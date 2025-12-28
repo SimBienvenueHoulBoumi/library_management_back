@@ -14,7 +14,7 @@ WORKDIR /app
 COPY --from=builder /app/target/*.jar app.jar
 
 # Port HTTP de l'application (par défaut 8080)
-EXPOSE 8080
+EXPOSE 8075
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
 

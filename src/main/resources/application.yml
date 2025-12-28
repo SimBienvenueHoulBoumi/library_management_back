@@ -51,7 +51,7 @@ springdoc:
   packages-to-scan: com.simdev.library.controller
 
 server:
-  port: 8080
+  port: 8075
 
 logging:
   level:
