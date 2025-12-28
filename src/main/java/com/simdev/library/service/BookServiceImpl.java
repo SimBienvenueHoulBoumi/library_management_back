@@ -42,7 +42,9 @@ public class BookServiceImpl implements BookService {
     
     @Override
     public Book createBook(Book book) {
-        if (book.getAvailableCopies() == null) {
+        // Si le nombre d'exemplaires disponibles n'est pas renseigné (null ou 0),
+        // on l'initialise au nombre total d'exemplaires
+        if (book.getAvailableCopies() == null || book.getAvailableCopies() == 0) {
             book.setAvailableCopies(book.getTotalCopies());
         }
         if (book.getAvailableCopies() > 0) {
