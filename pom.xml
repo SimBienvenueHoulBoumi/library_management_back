@@ -15,6 +15,15 @@
 	<description>Advanced Spring Boot project with JPA, HATEOAS and Swagger</description>
 	<properties>
 		<java.version>17</java.version>
+
+		<!-- Flags de contrôle des tests (unitaires / intégration) -->
+		<!-- true  = on saute les tests unitaires (utilisé pour ne lancer que les IT) -->
+		<!-- false = on exécute les tests unitaires (cas normal) -->
+		<skipUnitTests>false</skipUnitTests>
+
+		<!-- true  = on saute les tests d'intégration (cas normal sur mvn verify) -->
+		<!-- false = on exécute les tests d'intégration (IT) -->
+		<skipITs>true</skipITs>
 	</properties>
 	<dependencies>
 		<!-- Spring Boot Web -->
@@ -112,6 +121,45 @@
 					<source>17</source>
 					<target>17</target>
 				</configuration>
+			</plugin>
+
+			<!-- Tests unitaires -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.2.5</version>
+				<configuration>
+					<!-- Contrôle des tests unitaires via la propriété skipUnitTests -->
+					<skipTests>${skipUnitTests}</skipTests>
+					<!-- On laisse les IT au plugin Failsafe -->
+					<excludes>
+						<exclude>**/services/integration/**</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+
+			<!-- Tests d'intégration (IT) via Failsafe -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<version>3.2.5</version>
+				<configuration>
+					<!-- Inclure uniquement nos tests d'intégration -->
+					<includes>
+						<include>**/services/integration/**</include>
+					</includes>
+					<!-- Contrôle via la propriété skipITs (true par défaut) -->
+					<skipITs>${skipITs}</skipITs>
+				</configuration>
+				<executions>
+					<execution>
+						<id>integration-tests</id>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>
