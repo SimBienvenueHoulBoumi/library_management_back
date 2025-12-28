@@ -20,7 +20,7 @@ pipeline {
         PROJECT_VERSION = ""          // récupérée dynamiquement depuis le pom.xml
 
         // SCM
-        GIT_REPO_URL    = "git@github.com:SimBienvenueHoulBoumi/library-management.git"
+        GIT_REPO_URL    = "git@github.com:SimBienvenueHoulBoumi/library_management_back.git"
         GIT_BRANCH      = "main"
         GIT_CRED_ID     = "JENKINS_AGENT"
     }
