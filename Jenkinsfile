@@ -40,11 +40,10 @@ pipeline {
 
         // --- Docker / Nexus (même machine que Jenkins / ArgoCD) ---
         // Note: Nexus utilise HTTP (pas HTTPS), configurez Docker daemon.json avec insecure-registries
-        // Depuis le conteneur jenkins-agent, on peut utiliser soit:
-        // - nexus:8082 (nom du service Docker dans docker-compose)
-        // - host.docker.internal:8083 (depuis le daemon Docker de l'hôte via socket monté)
-        // On essaie d'abord nexus:8082, puis host.docker.internal:8083 en fallback
-        NEXUS_REGISTRY  = "nexus:8082"
+        // L'agent Jenkins monte /var/run/docker.sock, donc il utilise le daemon Docker de l'hôte (Mac)
+        // Depuis le daemon Docker de l'hôte, on doit utiliser localhost:8083 ou host.docker.internal:8083
+        // On essaie dans l'ordre: localhost:8083, puis host.docker.internal:8083
+        NEXUS_REGISTRY  = "localhost:8083"
         NEXUS_REGISTRY_FALLBACK = "host.docker.internal:8083"
         AUTHORITY       = "simdev"
         IMAGE_REPO      = "${NEXUS_REGISTRY}/${AUTHORITY}/${PROJECT_NAME}"
@@ -339,8 +338,8 @@ pipeline {
                         
                         echo "[DOCKER] Tentative de connexion à ${NEXUS_REGISTRY}..."
                         
-                        # Essayer d'abord avec nexus:8082 (nom du service Docker)
-                        # Si ça échoue, essayer avec host.docker.internal:8083 (depuis le daemon Docker de l'hôte)
+                        # Essayer d'abord avec localhost:8083, puis host.docker.internal:8083 en fallback
+                        # L'agent utilise le daemon Docker de l'hôte via /var/run/docker.sock
                         REGISTRY_TO_USE="${NEXUS_REGISTRY}"
                         LOGIN_SUCCESS=false
                         
@@ -371,8 +370,9 @@ pipeline {
                             echo "Vous devez configurer Docker Desktop sur votre Mac."
                             echo ""
                             
-                            # Détecter l'OS
-                            if [[ "$(uname)" == "Darwin" ]]; then
+                            # Détecter l'OS (utiliser [ au lieu de [[ pour compatibilité sh)
+                            OS_TYPE=$(uname)
+                            if [ "$OS_TYPE" = "Darwin" ]; then
                                 echo "📱 Détecté: macOS (Docker Desktop)"
                                 echo ""
                                 echo "1. Ouvrez Docker Desktop"
@@ -381,7 +381,7 @@ pipeline {
                                 echo ""
                                 echo '   {'
                                 echo '     "insecure-registries": ['
-                                echo '       "nexus:8082",'
+                                echo '       "localhost:8083",'
                                 echo '       "host.docker.internal:8083"'
                                 echo '     ]'
                                 echo '   }'
@@ -390,29 +390,25 @@ pipeline {
                                 echo "5. Attendez que Docker redémarre complètement (30-60 secondes)"
                                 echo "6. Vérifiez: docker info | grep -i insecure"
                             else
-                                echo "🐧 Détecté: Linux"
+                                echo "🐧 Détecté: Linux (agent dans conteneur, Docker de l'hôte)"
                                 echo ""
-                                echo "1. Connectez-vous à la machine où Docker tourne (hôte de l'agent)"
-                                echo "2. Éditez /etc/docker/daemon.json (ou créez-le):"
+                                echo "L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock"
+                                echo "Vous devez configurer Docker Desktop sur votre Mac (hôte):"
                                 echo ""
-                                echo '   sudo nano /etc/docker/daemon.json'
-                                echo ""
-                                echo "3. Ajoutez la configuration:"
+                                echo "1. Ouvrez Docker Desktop"
+                                echo "2. Allez dans Settings (⚙️) > Docker Engine"
+                                echo "3. Ajoutez/modifiez la configuration JSON:"
                                 echo ""
                                 echo '   {'
                                 echo '     "insecure-registries": ['
-                                echo '       "nexus:8082",'
+                                echo '       "localhost:8083",'
                                 echo '       "host.docker.internal:8083"'
                                 echo '     ]'
                                 echo '   }'
                                 echo ""
-                                echo "4. Redémarrez Docker:"
-                                echo ""
-                                echo "   sudo systemctl restart docker"
-                                echo ""
-                                echo "5. Vérifiez que Docker a redémarré:"
-                                echo ""
-                                echo "   sudo systemctl status docker"
+                                echo "4. Cliquez sur 'Apply & Restart'"
+                                echo "5. Attendez que Docker redémarre complètement (30-60 secondes)"
+                                echo "6. Vérifiez: docker info | grep -i insecure"
                             fi
                             echo ""
                             echo "═══════════════════════════════════════════════════════════════"
