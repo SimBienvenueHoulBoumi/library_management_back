@@ -80,10 +80,10 @@ pipeline {
 
         // --- ArgoCD (déploiement Kubernetes) ---
         // L'agent Jenkins n'est pas dans le cluster, donc on utilise host.docker.internal pour accéder à ArgoCD
-        // ArgoCD est configuré avec NodePort 30080 (voir infra/argocd/values.yaml)
-        // Si le NodePort n'est pas accessible, utilisez un port-forward: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
+        // ArgoCD doit être accessible via port-forward (NodePort ne fonctionne pas depuis conteneurs Docker)
+        // Utilisez: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
         ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
-        ARGOCD_SERVER        = "host.docker.internal:30080"  // NodePort configuré dans values.yaml
+        ARGOCD_SERVER        = "host.docker.internal:8084"  // Port-forward requis
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
         ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
