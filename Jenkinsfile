@@ -80,11 +80,10 @@ pipeline {
 
         // --- ArgoCD (déploiement Kubernetes) ---
         // L'agent Jenkins n'est pas dans le cluster, donc on utilise host.docker.internal pour accéder à ArgoCD
-        // ArgoCD doit être accessible via port-forward qui écoute sur toutes les interfaces (--address 0.0.0.0)
-        // Utilisez: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
-        // OU utilisez le script infra/argocd/port-forward.sh qui expose sur le port 9090
+        // ArgoCD est configuré avec NodePort 30080 (voir infra/argocd/values.yaml)
+        // Si le NodePort n'est pas accessible, utilisez un port-forward: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
         ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
-        ARGOCD_SERVER        = "host.docker.internal:8084"
+        ARGOCD_SERVER        = "host.docker.internal:30080"  // NodePort configuré dans values.yaml
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
         ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
@@ -453,9 +452,8 @@ pipeline {
             }
         }
 
-        stage('🚀 Deploy with ArgoCD') {
+        stage('🔧 ArgoCD CLI Check') {
             when {
-                // Déployer uniquement sur "main" après push réussi ET si ArgoCD est activé
                 expression { 
                     (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
                     env.ARGOCD_ENABLED == "true" 
@@ -463,148 +461,160 @@ pipeline {
             }
             steps {
                 script {
-                    echo "[ARGOCD] Déploiement de ${ARGOCD_APP_NAME} vers le cluster Kubernetes..."
-                    
-                    // Vérifier si ArgoCD CLI est disponible
                     def argocdAvailable = sh(
                         script: 'which argocd || command -v argocd',
                         returnStdout: true
                     ).trim()
                     
                     if (!argocdAvailable) {
-                        echo "[ARGOCD] ⚠️ ArgoCD CLI non trouvé - installation..."
                         sh '''
                             curl -sSL -o /tmp/argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             sudo install -m 555 /tmp/argocd-linux-amd64 /usr/local/bin/argocd
                             rm /tmp/argocd-linux-amd64
                         '''
                     }
-                    
-                    // Se connecter à ArgoCD et créer/synchroniser l'application
-                    withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
-                        sh """
-                            echo "[ARGOCD] Connexion à ${ARGOCD_SERVER}..."
-                            
-                            # Tester la connectivité avant de se connecter
-                            echo "[ARGOCD] Test de connectivité vers ${ARGOCD_SERVER}..."
-                            HOST=\$(echo ${ARGOCD_SERVER} | cut -d: -f1)
-                            PORT=\$(echo ${ARGOCD_SERVER} | cut -d: -f2)
-                            
-                            if ! timeout 5 bash -c "echo > /dev/tcp/\$HOST/\$PORT" 2>/dev/null; then
-                                echo ""
-                                echo "═══════════════════════════════════════════════════════════════"
-                                echo "[ARGOCD] ⚠️  Impossible de se connecter à ${ARGOCD_SERVER}"
-                                echo "═══════════════════════════════════════════════════════════════"
-                                echo ""
-                                echo "ArgoCD n'est pas accessible. Le déploiement ArgoCD sera ignoré."
-                                echo ""
-                                echo "Pour activer le déploiement ArgoCD :"
-                                echo ""
-                                echo "1. Installez ArgoCD dans le cluster :"
-                                echo "   cd ~/Documents/projets/infra/argocd && ./run.sh"
-                                echo ""
-                                echo "2. Démarrez le port-forward (écoute sur toutes les interfaces) :"
-                                echo "   kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80"
-                                echo ""
-                                echo "OU utilisez le script (expose sur port 9090) :"
-                                echo "   cd ~/Documents/projets/infra/argocd && ./port-forward.sh"
-                                echo "   (mettez à jour ARGOCD_SERVER=host.docker.internal:9090 dans le Jenkinsfile)"
-                                echo ""
-                                echo "3. Vérifiez que le port-forward écoute sur toutes les interfaces (--address 0.0.0.0,::)"
-                                echo ""
-                                echo "Pour désactiver ce stage, mettez ARGOCD_ENABLED=false dans le Jenkinsfile"
-                                echo ""
-                                echo "═══════════════════════════════════════════════════════════════"
-                                exit 1
-                            fi
-                            
-                            echo "[ARGOCD] ✅ Connectivité OK vers ${ARGOCD_SERVER}"
-                            
-                            # Se connecter à ArgoCD
-                            argocd login ${ARGOCD_SERVER} \\
-                                --username admin \\
-                                --password "\${ARGOCD_PASS}" \\
-                                --insecure || {
-                                echo "[ARGOCD] ❌ Échec de connexion à ${ARGOCD_SERVER}"
-                                echo "[ARGOCD] Vérifiez que:"
-                                echo "[ARGOCD]   1. Le port-forward ArgoCD est actif: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80"
-                                echo "[ARGOCD]   2. Le port-forward écoute sur toutes les interfaces (--address 0.0.0.0,::)"
-                                echo "[ARGOCD]   3. Les credentials ArgoCD sont corrects"
-                                exit 1
-                            }
-                            
-                            # Vérifier et configurer le repo Git si nécessaire
-                            echo "[ARGOCD] Vérification du repo Git dans ArgoCD..."
-                            if ! argocd repo get ${GIT_REPO_URL} &>/dev/null; then
-                                echo "[ARGOCD] 📦 Ajout du repo Git à ArgoCD..."
-                                # Pour un repo SSH, ArgoCD utilisera les credentials du cluster
-                                # Si besoin de credentials spécifiques, utilisez: --ssh-private-key-path
-                                argocd repo add ${GIT_REPO_URL} \\
-                                    --name ${PROJECT_NAME}-repo \\
-                                    --insecure-skip-server-verification || {
-                                    echo "[ARGOCD] ⚠️ Échec d'ajout du repo (peut-être déjà présent ou besoin de credentials)"
-                                    echo "[ARGOCD] Vérifiez manuellement: argocd repo list"
-                                }
-                            else
-                                echo "[ARGOCD] ✅ Repo Git déjà configuré"
-                            fi
-                            
-                            # Vérifier si l'application existe
-                            if argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
-                                echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} existe déjà"
-                            else
-                                echo "[ARGOCD] 📦 Création de l'application ${ARGOCD_APP_NAME}..."
-                                
-                                # Créer l'application ArgoCD automatiquement
-                                argocd app create ${ARGOCD_APP_NAME} \\
-                                    --repo ${GIT_REPO_URL} \\
-                                    --path ${ARGOCD_CHART_PATH} \\
-                                    --dest-server https://kubernetes.default.svc \\
-                                    --dest-namespace ${ARGOCD_NAMESPACE} \\
-                                    --sync-policy automated \\
-                                    --self-heal \\
-                                    --auto-prune || {
-                                    echo "[ARGOCD] ❌ Échec de création de l'application"
-                                    echo "[ARGOCD] Vérifiez que:"
-                                    echo "  1. Le repo Git est accessible depuis ArgoCD"
-                                    echo "  2. Le chemin ${ARGOCD_CHART_PATH} existe dans le repo"
-                                    echo "  3. Le chart Helm est valide"
-                                    exit 1
-                                }
-                                
-                                echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} créée avec succès"
-                            fi
-                            
-                            # Mettre à jour l'image via paramètres Helm
-                            echo "[ARGOCD] Mise à jour de l'image vers ${env.IMAGE_NAME_VERSION}..."
-                            argocd app set ${ARGOCD_APP_NAME} \\
-                                --helm-set image.repository=${IMAGE_REPO} \\
-                                --helm-set image.tag=${env.PROJECT_VERSION} \\
-                                --sync || true
-                            
-                            # Attendre la synchronisation
-                            echo "[ARGOCD] Attente de la synchronisation (timeout 5min)..."
-                            argocd app wait ${ARGOCD_APP_NAME} \\
-                                --timeout 300 \\
-                                --health || {
-                                echo "[ARGOCD] ⚠️ Timeout ou problème de santé - vérifiez manuellement"
-                            }
-                            
-                            # Afficher le statut final
-                            echo "[ARGOCD] === Statut de l'application ==="
-                            argocd app get ${ARGOCD_APP_NAME}
-                        """
-                    }
-                    
-                    echo "[ARGOCD] ✅ Déploiement terminé"
                 }
             }
-            post {
-                success {
-                    echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} déployée avec succès"
+        }
+
+        stage('🔌 ArgoCD Connectivity') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
                 }
-                failure {
-                    echo "[ARGOCD] ❌ Échec du déploiement - vérifiez les logs ArgoCD"
+            }
+            steps {
+                sh """
+                    HOST=\$(echo ${ARGOCD_SERVER} | cut -d: -f1)
+                    PORT=\$(echo ${ARGOCD_SERVER} | cut -d: -f2)
+                    
+                    if ! timeout 5 bash -c "echo > /dev/tcp/\$HOST/\$PORT" 2>/dev/null; then
+                        exit 1
+                    fi
+                """
+            }
+        }
+
+        stage('🔐 ArgoCD Login') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                    sh """
+                        argocd login ${ARGOCD_SERVER} \\
+                            --username admin \\
+                            --password "\${ARGOCD_PASS}" \\
+                            --insecure || exit 1
+                    """
+                }
+            }
+        }
+
+        stage('📦 ArgoCD Repo Setup') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                    sh """
+                        argocd login ${ARGOCD_SERVER} \\
+                            --username admin \\
+                            --password "\${ARGOCD_PASS}" \\
+                            --insecure || exit 1
+                        
+                        if ! argocd repo get ${GIT_REPO_URL} &>/dev/null; then
+                            argocd repo add ${GIT_REPO_URL} \\
+                                --name ${PROJECT_NAME}-repo \\
+                                --insecure-skip-server-verification || true
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('📱 ArgoCD App Create/Update') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                    sh """
+                        argocd login ${ARGOCD_SERVER} \\
+                            --username admin \\
+                            --password "\${ARGOCD_PASS}" \\
+                            --insecure || exit 1
+                        
+                        if ! argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
+                            argocd app create ${ARGOCD_APP_NAME} \\
+                                --repo ${GIT_REPO_URL} \\
+                                --path ${ARGOCD_CHART_PATH} \\
+                                --dest-server https://kubernetes.default.svc \\
+                                --dest-namespace ${ARGOCD_NAMESPACE} \\
+                                --sync-policy automated \\
+                                --self-heal \\
+                                --auto-prune || exit 1
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('🔄 ArgoCD Sync') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                    sh """
+                        argocd login ${ARGOCD_SERVER} \\
+                            --username admin \\
+                            --password "\${ARGOCD_PASS}" \\
+                            --insecure || exit 1
+                        
+                        argocd app set ${ARGOCD_APP_NAME} \\
+                            --helm-set image.repository=${IMAGE_REPO} \\
+                            --helm-set image.tag=${env.PROJECT_VERSION} \\
+                            --sync || true
+                    """
+                }
+            }
+        }
+
+        stage('⏳ ArgoCD Wait') {
+            when {
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                    sh """
+                        argocd login ${ARGOCD_SERVER} \\
+                            --username admin \\
+                            --password "\${ARGOCD_PASS}" \\
+                            --insecure || exit 1
+                        
+                        argocd app wait ${ARGOCD_APP_NAME} \\
+                            --timeout 300 \\
+                            --health || true
+                        
+                        argocd app get ${ARGOCD_APP_NAME}
+                    """
                 }
             }
         }
