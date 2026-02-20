@@ -529,10 +529,10 @@ pipeline {
                             fi
                             
                             # Mettre à jour l'image via paramètres Helm
-                            echo "[ARGOCD] Mise à jour de l'image vers ${IMAGE_NAME_VERSION}..."
+                            echo "[ARGOCD] Mise à jour de l'image vers ${env.IMAGE_NAME_VERSION}..."
                             argocd app set ${ARGOCD_APP_NAME} \\
                                 --helm-set image.repository=${IMAGE_REPO} \\
-                                --helm-set image.tag=${PROJECT_VERSION} \\
+                                --helm-set image.tag=${env.PROJECT_VERSION} \\
                                 --sync || true
                             
                             # Attendre la synchronisation
