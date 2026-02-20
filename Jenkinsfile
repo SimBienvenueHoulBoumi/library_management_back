@@ -79,7 +79,9 @@ pipeline {
         FAIL_ON_TRIVY_VULNS  = "false"
 
         // --- ArgoCD (déploiement Kubernetes) ---
-        ARGOCD_SERVER        = "argocd-server.argocd.svc.cluster.local:80"
+        // L'agent Jenkins n'est pas dans le cluster, donc on utilise host.docker.internal pour accéder à ArgoCD
+        // ArgoCD est accessible sur http://localhost:8084/applications depuis l'hôte
+        ARGOCD_SERVER        = "host.docker.internal:8084"
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
         ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
