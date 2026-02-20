@@ -79,11 +79,12 @@ pipeline {
         FAIL_ON_TRIVY_VULNS  = "false"
 
         // --- ArgoCD (déploiement Kubernetes) ---
-        // L'agent Jenkins n'est pas dans le cluster, donc on utilise host.docker.internal pour accéder à ArgoCD
-        // ArgoCD doit être accessible via port-forward (NodePort ne fonctionne pas depuis conteneurs Docker)
-        // Utilisez: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
+        // ArgoCD est accessible via le service nginx proxy (argocd-proxy) dans docker-compose
+        // Le service argocd-proxy fait proxy vers ArgoCD (NodePort 30080 ou port-forward 8084)
+        // Pour démarrer ArgoCD: cd infra && ./start-argocd.sh
+        // Pour démarrer le service proxy: docker compose up -d argocd-proxy
         ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
-        ARGOCD_SERVER        = "host.docker.internal:8084"  // Port-forward requis
+        ARGOCD_SERVER        = "argocd-proxy:8084"  // Service nginx proxy dans docker-compose (même réseau Docker)
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
         ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
@@ -468,9 +469,15 @@ pipeline {
                     
                     if (!argocdAvailable) {
                         sh '''
-                            curl -sSL -o /tmp/argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                            sudo install -m 555 /tmp/argocd-linux-amd64 /usr/local/bin/argocd
-                            rm /tmp/argocd-linux-amd64
+                            ARCH=$(uname -m)
+                            if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+                                ARGOCD_ARCH="arm64"
+                            else
+                                ARGOCD_ARCH="amd64"
+                            fi
+                            curl -sSL -o /tmp/argocd-linux-${ARGOCD_ARCH} https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-${ARGOCD_ARCH}
+                            sudo install -m 555 /tmp/argocd-linux-${ARGOCD_ARCH} /usr/local/bin/argocd
+                            rm /tmp/argocd-linux-${ARGOCD_ARCH}
                         '''
                     }
                 }
@@ -486,8 +493,8 @@ pipeline {
             }
             steps {
                 sh """
-                    HOST=\$(echo ${ARGOCD_SERVER} | cut -d: -f1)
-                    PORT=\$(echo ${ARGOCD_SERVER} | cut -d: -f2)
+                    HOST=\$(echo ${env.ARGOCD_SERVER} | cut -d: -f1)
+                    PORT=\$(echo ${env.ARGOCD_SERVER} | cut -d: -f2)
                     
                     if ! timeout 5 bash -c "echo > /dev/tcp/\$HOST/\$PORT" 2>/dev/null; then
                         exit 1
@@ -506,7 +513,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${ARGOCD_SERVER} \\
+                        argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
                             --insecure || exit 1
@@ -525,7 +532,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${ARGOCD_SERVER} \\
+                        argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
                             --insecure || exit 1
@@ -550,7 +557,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${ARGOCD_SERVER} \\
+                        argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
                             --insecure || exit 1
@@ -580,7 +587,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${ARGOCD_SERVER} \\
+                        argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
                             --insecure || exit 1
@@ -604,7 +611,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${ARGOCD_SERVER} \\
+                        argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
                             --insecure || exit 1
