@@ -1,3 +1,12 @@
+// Pipeline CI/CD pour "library-management"
+// 1) Checkout + lecture version Maven
+// 2) Tests unitaires + build
+// 3) Tests d'intégration
+// 4) Analyse SonarQube
+// 5) Build & tag Docker (BUILD / SHA / VERSION)
+// 6) Scans sécurité (Snyk, Trivy)
+// 7) Push image vers Nexus (seulement sur main)
+// 8) Nettoyage local des images
 pipeline {
     agent {
         node {
@@ -9,40 +18,38 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 30, unit: 'MINUTES')
         timestamps()
-        // On désactive le checkout SCM automatique
         skipDefaultCheckout(true)
     }
 
     environment {
-        // --- App & Docker ---
+        // --- Identité applicative ---
         APP_NAME        = "library-management"
         PROJECT_NAME    = "library-management"
-        PROJECT_VERSION = ""          // récupérée dynamiquement depuis le pom.xml
+        PROJECT_VERSION = ""
 
-        // SCM
+        // --- SCM (GitHub) ---
+        // BRANCH_NAME (multibranch) sinon "main"
         GIT_REPO_URL    = "git@github.com:SimBienvenueHoulBoumi/library_management_back.git"
-        GIT_BRANCH      = "main"
+        GIT_BRANCH      = "${BRANCH_NAME ?: 'main'}"
         GIT_CRED_ID     = "JENKINS_AGENT"
 
-        // Docker / Nexus
-        NEXUS_REGISTRY  = "localhost:8083"
+        // --- Docker / Nexus (même machine que Jenkins / ArgoCD) ---
+        NEXUS_REGISTRY  = "host.docker.internal:8083"
         AUTHORITY       = "simdev"
         IMAGE_REPO      = "${NEXUS_REGISTRY}/${AUTHORITY}/${PROJECT_NAME}"
 
-        // Tags d'image (valeurs SHA recalculées dans le stage Docker)
+        // Tags "locaux" (sans registry)
         IMAGE_TAG_BUILD   = "${APP_NAME}:${BUILD_NUMBER}"
-        IMAGE_TAG_SHA     = ""                               // défini avec le SHA dans le stage Docker
-        IMAGE_TAG_VERSION = "${APP_NAME}:${PROJECT_VERSION}" // tag immuable basé sur la version applicative
+        IMAGE_TAG_SHA     = ""
+        IMAGE_TAG_VERSION = "${APP_NAME}:${PROJECT_VERSION}"
 
-        // Credentials Nexus
         NEXUS_CREDENTIALS = "NEXUS_CREDENTIALS"
 
-        // SonarQube
+        // --- SonarQube (analyse qualité) ---
         SONAR_SERVER       = "SonarQube"
         SONAR_URL          = "http://sonarqube:9000"
         SONAR_PROJECT_KEY  = "library-management"
         SONAR_PROJECT_NAME = "library-management"
-        // Surchargée au runtime avec la version Maven du projet
         SONAR_PROJECT_VERSION = ""
         SONAR_SOURCES = "src/"
         SONAR_JAVA_BINARIES = "target/classes"
@@ -51,22 +58,28 @@ pipeline {
         SONAR_JAVA_CHECKSTYLE_REPORT_PATHS = "target/checkstyle-result.xml"
         SONAR_EXCLUSIONS = "**/target/**,**/test/**,**/*.json,**/*.yml"
 
-        // Outils sécurité
+        // --- Outils sécurité (Snyk / Trivy) ---
         SNYK_CLI          = "snyk"
-        // Organisation Snyk (même que pour tasks)
         SNYK_ORG          = "967f8e17-af81-450e-98d1-e19b3e27f316"
-        // Nom de projet container Snyk pour ce repo
         SNYK_PROJECT_NAME_CONTAINER = "library-management-container"
 
         // --- Feature flags de durcissement (ON/OFF) ---
-        FAIL_ON_SONAR_QGATE  = "false"   // si Quality Gate != OK -> échec build
-        FAIL_ON_SNYK_VULNS   = "false"   // si Snyk trouve des vulnérabilités -> échec (sinon warning)
-        FAIL_ON_TRIVY_VULNS  = "false"   // idem pour Trivy
+        FAIL_ON_SONAR_QGATE  = "false"
+        FAIL_ON_SNYK_VULNS   = "false"
+        FAIL_ON_TRIVY_VULNS  = "false"
+
+        // --- ArgoCD (déploiement Kubernetes) ---
+        ARGOCD_SERVER        = "argocd-server.argocd.svc.cluster.local:80"
+        ARGOCD_APP_NAME      = "${PROJECT_NAME}"
+        ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
+        ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
+        ARGOCD_CHART_PATH    = "kubernetes/charts/${PROJECT_NAME}"  // Chemin vers le chart Helm dans le repo
     }
 
     stages {
 
         stage('📥 Checkout') {
+            // Nettoyage workspace + checkout Git + lecture de la version Maven
             steps {
                 deleteDir()
                 git branch: "${GIT_BRANCH}",
@@ -74,7 +87,6 @@ pipeline {
                     credentialsId: "${GIT_CRED_ID}"
 
                 script {
-                    // Récupère la version Maven déclarée dans le pom.xml
                     def v = sh(
                         script: './mvnw help:evaluate -Dexpression=project.version -q -DforceStdout',
                         returnStdout: true
@@ -89,8 +101,8 @@ pipeline {
         }
 
         stage('🧪 Unit Tests & Build') {
+            // Tests unitaires + build du jar (sans tests d'intégration)
             steps {
-                // Tests unitaires + build, en sautant les tests d'intégration (Failsafe)
                 sh './mvnw clean verify -DskipITs=true -DskipUnitTests=false'
             }
             post {
@@ -104,8 +116,8 @@ pipeline {
         }
 
         stage('🔗 Integration Tests (IT)') {
+            // Tests d'intégration (Failsafe), les TU sont déjà exécutés
             steps {
-                // Tests d'intégration uniquement (Failsafe), on saute les tests unitaires
                 sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
             }
             post {
@@ -116,6 +128,7 @@ pipeline {
         }
 
         stage('📊 SonarQube') {
+            // Analyse qualité (SonarQube) avec Quality Gate optionnelle
             steps {
                 echo '[Étape 1] Vérification DNS SonarQube'
                 sh '''
@@ -146,9 +159,9 @@ pipeline {
         }
 
         stage('🐳 Docker Build & Tag') {
+            // Build de l'image Docker et tagging (BUILD / SHA / VERSION)
             steps {
                 script {
-                    // Récupérer le SHA court du commit
                     def commit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
 
                     env.IMAGE_TAG_BUILD   = "${APP_NAME}:${BUILD_NUMBER}"
@@ -159,7 +172,6 @@ pipeline {
                     env.IMAGE_NAME_SHA     = "${IMAGE_REPO}:${commit}"
                     env.IMAGE_NAME_VERSION = "${IMAGE_REPO}:${env.PROJECT_VERSION}"
 
-                    // Build sans BuildKit (buildx non installé sur l'agent)
                     sh """
                         docker build \\
                           -t ${IMAGE_NAME_BUILD} \\
@@ -172,6 +184,7 @@ pipeline {
         }
 
         stage('🔐 Snyk Scan') {
+            // Scan de vulnérabilités avec Snyk (container)
             steps {
                 withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
                     sh '''
@@ -215,6 +228,7 @@ pipeline {
         }
 
         stage('🔬 Trivy') {
+            // Scan de vulnérabilités avec Trivy (container)
             steps {
                 sh '''
                     set +e
@@ -250,6 +264,10 @@ pipeline {
         }
 
         stage('📦 Push to Nexus') {
+            when {
+                // Push de l'image uniquement sur "main" (branches feature = CI only)
+                expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' }
+            }
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: "${NEXUS_CREDENTIALS}",
@@ -265,6 +283,120 @@ pipeline {
 
                         docker logout ${NEXUS_REGISTRY}
                     '''
+                }
+            }
+        }
+
+        stage('🚀 Deploy with ArgoCD') {
+            when {
+                // Déployer uniquement sur "main" après push réussi
+                expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' }
+            }
+            steps {
+                script {
+                    echo "[ARGOCD] Déploiement de ${ARGOCD_APP_NAME} vers le cluster Kubernetes..."
+                    
+                    // Vérifier si ArgoCD CLI est disponible
+                    def argocdAvailable = sh(
+                        script: 'which argocd || command -v argocd',
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (!argocdAvailable) {
+                        echo "[ARGOCD] ⚠️ ArgoCD CLI non trouvé - installation..."
+                        sh '''
+                            curl -sSL -o /tmp/argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            sudo install -m 555 /tmp/argocd-linux-amd64 /usr/local/bin/argocd
+                            rm /tmp/argocd-linux-amd64
+                        '''
+                    }
+                    
+                    // Se connecter à ArgoCD et créer/synchroniser l'application
+                    withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                        sh """
+                            echo "[ARGOCD] Connexion à ${ARGOCD_SERVER}..."
+                            
+                            # Se connecter à ArgoCD
+                            argocd login ${ARGOCD_SERVER} \\
+                                --username admin \\
+                                --password "\${ARGOCD_PASS}" \\
+                                --insecure || {
+                                echo "[ARGOCD] ❌ Échec de connexion"
+                                exit 1
+                            }
+                            
+                            # Vérifier et configurer le repo Git si nécessaire
+                            echo "[ARGOCD] Vérification du repo Git dans ArgoCD..."
+                            if ! argocd repo get ${GIT_REPO_URL} &>/dev/null; then
+                                echo "[ARGOCD] 📦 Ajout du repo Git à ArgoCD..."
+                                # Pour un repo SSH, ArgoCD utilisera les credentials du cluster
+                                # Si besoin de credentials spécifiques, utilisez: --ssh-private-key-path
+                                argocd repo add ${GIT_REPO_URL} \\
+                                    --name ${PROJECT_NAME}-repo \\
+                                    --insecure-skip-server-verification || {
+                                    echo "[ARGOCD] ⚠️ Échec d'ajout du repo (peut-être déjà présent ou besoin de credentials)"
+                                    echo "[ARGOCD] Vérifiez manuellement: argocd repo list"
+                                }
+                            else
+                                echo "[ARGOCD] ✅ Repo Git déjà configuré"
+                            fi
+                            
+                            # Vérifier si l'application existe
+                            if argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
+                                echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} existe déjà"
+                            else
+                                echo "[ARGOCD] 📦 Création de l'application ${ARGOCD_APP_NAME}..."
+                                
+                                # Créer l'application ArgoCD automatiquement
+                                argocd app create ${ARGOCD_APP_NAME} \\
+                                    --repo ${GIT_REPO_URL} \\
+                                    --path ${ARGOCD_CHART_PATH} \\
+                                    --dest-server https://kubernetes.default.svc \\
+                                    --dest-namespace ${ARGOCD_NAMESPACE} \\
+                                    --sync-policy automated \\
+                                    --self-heal \\
+                                    --auto-prune || {
+                                    echo "[ARGOCD] ❌ Échec de création de l'application"
+                                    echo "[ARGOCD] Vérifiez que:"
+                                    echo "  1. Le repo Git est accessible depuis ArgoCD"
+                                    echo "  2. Le chemin ${ARGOCD_CHART_PATH} existe dans le repo"
+                                    echo "  3. Le chart Helm est valide"
+                                    exit 1
+                                }
+                                
+                                echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} créée avec succès"
+                            fi
+                            
+                            # Mettre à jour l'image via paramètres Helm
+                            echo "[ARGOCD] Mise à jour de l'image vers ${IMAGE_NAME_VERSION}..."
+                            argocd app set ${ARGOCD_APP_NAME} \\
+                                --helm-set image.repository=${IMAGE_REPO} \\
+                                --helm-set image.tag=${PROJECT_VERSION} \\
+                                --sync || true
+                            
+                            # Attendre la synchronisation
+                            echo "[ARGOCD] Attente de la synchronisation (timeout 5min)..."
+                            argocd app wait ${ARGOCD_APP_NAME} \\
+                                --timeout 300 \\
+                                --health || {
+                                echo "[ARGOCD] ⚠️ Timeout ou problème de santé - vérifiez manuellement"
+                            }
+                            
+                            # Afficher le statut final
+                            echo "[ARGOCD] === Statut de l'application ==="
+                            argocd app get ${ARGOCD_APP_NAME}
+                        """
+                    }
+                    
+                    echo "[ARGOCD] ✅ Déploiement terminé"
+                }
+            }
+            post {
+                success {
+                    echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} déployée avec succès"
+                }
+                failure {
+                    echo "[ARGOCD] ❌ Échec du déploiement - vérifiez les logs ArgoCD"
                 }
             }
         }
@@ -288,7 +420,6 @@ pipeline {
             echo "[Pipeline] ❌ Build échoué — consulte les logs et rapports (JUnit, Sonar, Snyk, Trivy)."
         }
         always {
-            // Archivage ciblé : jar et rapports
             archiveArtifacts artifacts: 'target/*.jar, target/surefire-reports/**, target/failsafe-reports/**, reports/**', allowEmptyArchive: true
         }
     }
