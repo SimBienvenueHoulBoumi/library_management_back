@@ -34,7 +34,13 @@ pipeline {
         GIT_CRED_ID     = "JENKINS_AGENT"
 
         // --- Docker / Nexus (même machine que Jenkins / ArgoCD) ---
-        NEXUS_REGISTRY  = "host.docker.internal:8083"
+        // Note: Nexus utilise HTTP (pas HTTPS), configurez Docker daemon.json avec insecure-registries
+        // Depuis le conteneur jenkins-agent, on peut utiliser soit:
+        // - nexus:8082 (nom du service Docker dans docker-compose)
+        // - host.docker.internal:8083 (depuis le daemon Docker de l'hôte via socket monté)
+        // On essaie d'abord nexus:8082, puis host.docker.internal:8083 en fallback
+        NEXUS_REGISTRY  = "nexus:8082"
+        NEXUS_REGISTRY_FALLBACK = "host.docker.internal:8083"
         AUTHORITY       = "simdev"
         IMAGE_REPO      = "${NEXUS_REGISTRY}/${AUTHORITY}/${PROJECT_NAME}"
 
@@ -275,13 +281,139 @@ pipeline {
                     passwordVariable: 'PASS'
                 )]) {
                     sh '''
-                        echo "$PASS" | docker login ${NEXUS_REGISTRY} -u "$USER" --password-stdin
+                        # Nexus utilise HTTP (pas HTTPS), Docker doit être configuré pour accepter ce registry comme insecure
+                        # Si vous obtenez l'erreur "server gave HTTP response to HTTPS client", configurez Docker daemon.json
+                        echo "[DOCKER] 🔍 Diagnostic Docker..."
+                        echo "[DOCKER] OS: $(uname -a)"
+                        echo "[DOCKER] Docker version: $(docker --version || echo 'N/A')"
+                        echo "[DOCKER] Registry cible: ${NEXUS_REGISTRY}"
+                        
+                        # Vérifier la configuration Docker
+                        echo "[DOCKER] Configuration Docker actuelle:"
+                        if docker info 2>/dev/null | grep -i "insecure" || docker info 2>/dev/null | grep -i "registry"; then
+                            docker info 2>/dev/null | grep -i "insecure" || docker info 2>/dev/null | grep -i "registry" || echo "  (aucune config insecure-registries trouvée)"
+                        else
+                            echo "  ⚠️  Aucune configuration 'insecure-registries' détectée"
+                        fi
+                        
+                        # Vérifier si daemon.json existe
+                        if [ -f /etc/docker/daemon.json ]; then
+                            echo "[DOCKER] Fichier /etc/docker/daemon.json trouvé:"
+                            cat /etc/docker/daemon.json | head -20
+                        else
+                            echo "[DOCKER] ⚠️  /etc/docker/daemon.json n'existe pas"
+                        fi
+                        
+                        echo "[DOCKER] Tentative de connexion à ${NEXUS_REGISTRY}..."
+                        
+                        # Essayer d'abord avec nexus:8082 (nom du service Docker)
+                        # Si ça échoue, essayer avec host.docker.internal:8083 (depuis le daemon Docker de l'hôte)
+                        REGISTRY_TO_USE="${NEXUS_REGISTRY}"
+                        LOGIN_SUCCESS=false
+                        
+                        if echo "$PASS" | docker login ${NEXUS_REGISTRY} -u "$USER" --password-stdin 2>&1; then
+                            echo "[DOCKER] ✅ Connexion réussie avec ${NEXUS_REGISTRY}"
+                            LOGIN_SUCCESS=true
+                        else
+                            echo "[DOCKER] ⚠️  Échec avec ${NEXUS_REGISTRY}, tentative avec ${NEXUS_REGISTRY_FALLBACK}..."
+                            if echo "$PASS" | docker login ${NEXUS_REGISTRY_FALLBACK} -u "$USER" --password-stdin 2>&1; then
+                                echo "[DOCKER] ✅ Connexion réussie avec ${NEXUS_REGISTRY_FALLBACK}"
+                                REGISTRY_TO_USE="${NEXUS_REGISTRY_FALLBACK}"
+                                LOGIN_SUCCESS=true
+                            fi
+                        fi
+                        
+                        if [ "$LOGIN_SUCCESS" = false ]; then
+                            echo ""
+                            echo "═══════════════════════════════════════════════════════════════"
+                            echo "[DOCKER] ❌ ÉCHEC DE CONNEXION"
+                            echo "═══════════════════════════════════════════════════════════════"
+                            echo ""
+                            echo "Problème: Docker essaie HTTPS alors que Nexus utilise HTTP"
+                            echo "Registries testés: ${NEXUS_REGISTRY} et ${NEXUS_REGISTRY_FALLBACK}"
+                            echo ""
+                            echo "🔧 SOLUTION: Configurez Docker daemon.json sur l'HÔTE DOCKER (Mac)"
+                            echo ""
+                            echo "L'agent Jenkins monte /var/run/docker.sock, donc il utilise le daemon Docker de l'hôte."
+                            echo "Vous devez configurer Docker Desktop sur votre Mac."
+                            echo ""
+                            
+                            # Détecter l'OS
+                            if [[ "$(uname)" == "Darwin" ]]; then
+                                echo "📱 Détecté: macOS (Docker Desktop)"
+                                echo ""
+                                echo "1. Ouvrez Docker Desktop"
+                                echo "2. Allez dans Settings (⚙️) > Docker Engine"
+                                echo "3. Ajoutez/modifiez la configuration JSON:"
+                                echo ""
+                                echo '   {'
+                                echo '     "insecure-registries": ['
+                                echo '       "nexus:8082",'
+                                echo '       "host.docker.internal:8083"'
+                                echo '     ]'
+                                echo '   }'
+                                echo ""
+                                echo "4. Cliquez sur 'Apply & Restart'"
+                                echo "5. Attendez que Docker redémarre complètement (30-60 secondes)"
+                                echo "6. Vérifiez: docker info | grep -i insecure"
+                            else
+                                echo "🐧 Détecté: Linux"
+                                echo ""
+                                echo "1. Connectez-vous à la machine où Docker tourne (hôte de l'agent)"
+                                echo "2. Éditez /etc/docker/daemon.json (ou créez-le):"
+                                echo ""
+                                echo '   sudo nano /etc/docker/daemon.json'
+                                echo ""
+                                echo "3. Ajoutez la configuration:"
+                                echo ""
+                                echo '   {'
+                                echo '     "insecure-registries": ['
+                                echo '       "nexus:8082",'
+                                echo '       "host.docker.internal:8083"'
+                                echo '     ]'
+                                echo '   }'
+                                echo ""
+                                echo "4. Redémarrez Docker:"
+                                echo ""
+                                echo "   sudo systemctl restart docker"
+                                echo ""
+                                echo "5. Vérifiez que Docker a redémarré:"
+                                echo ""
+                                echo "   sudo systemctl status docker"
+                            fi
+                            echo ""
+                            echo "═══════════════════════════════════════════════════════════════"
+                            exit 1
+                        fi
 
+                        # Reconstruire les noms d'images avec le registry qui a fonctionné
+                        # Si le registry a changé, on doit retagger les images
+                        if [ "${REGISTRY_TO_USE}" != "${NEXUS_REGISTRY}" ]; then
+                            echo "[DOCKER] Retagging images avec le nouveau registry ${REGISTRY_TO_USE}..."
+                            # Extraire les tags depuis les noms d'images existants
+                            TAG_BUILD=$(echo ${IMAGE_NAME_BUILD} | cut -d: -f2)
+                            TAG_SHA=$(echo ${IMAGE_NAME_SHA} | cut -d: -f2)
+                            TAG_VERSION=$(echo ${IMAGE_NAME_VERSION} | cut -d: -f2)
+                            
+                            NEW_IMAGE_BUILD="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_BUILD}"
+                            NEW_IMAGE_SHA="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_SHA}"
+                            NEW_IMAGE_VERSION="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_VERSION}"
+                            
+                            docker tag ${IMAGE_NAME_BUILD} ${NEW_IMAGE_BUILD}
+                            docker tag ${IMAGE_NAME_SHA} ${NEW_IMAGE_SHA}
+                            docker tag ${IMAGE_NAME_VERSION} ${NEW_IMAGE_VERSION}
+                            
+                            IMAGE_NAME_BUILD=${NEW_IMAGE_BUILD}
+                            IMAGE_NAME_SHA=${NEW_IMAGE_SHA}
+                            IMAGE_NAME_VERSION=${NEW_IMAGE_VERSION}
+                        fi
+                        
+                        echo "[DOCKER] Pushing images vers ${REGISTRY_TO_USE}..."
                         docker push ${IMAGE_NAME_BUILD}
                         docker push ${IMAGE_NAME_SHA}
                         docker push ${IMAGE_NAME_VERSION}
 
-                        docker logout ${NEXUS_REGISTRY}
+                        docker logout ${REGISTRY_TO_USE}
                     '''
                 }
             }
