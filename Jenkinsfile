@@ -15,7 +15,12 @@ pipeline {
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Garder uniquement les 10 derniers builds et leurs artefacts
+        buildDiscarder(logRotator(
+            numToKeepStr: '10',
+            artifactNumToKeepStr: '10',
+            daysToKeepStr: '30'  // Supprimer les builds de plus de 30 jours même s'il y en a moins de 10
+        ))
         timeout(time: 30, unit: 'MINUTES')
         timestamps()
         skipDefaultCheckout(true)
@@ -113,7 +118,21 @@ pipeline {
             }
             post {
                 always {
-                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
+                    script {
+                        // Vérifier que les rapports existent avant de les archiver
+                        def reportsExist = sh(
+                            script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1',
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (reportsExist) {
+                            echo "[UT] 📊 Archivage des résultats de tests unitaires..."
+                            sh 'ls -la target/surefire-reports/*.xml || true'
+                            junit testResults: 'target/surefire-reports/TEST-*.xml', allowEmptyResults: true, keepLongStdio: true
+                        } else {
+                            echo "[UT] ⚠️  Aucun rapport de test unitaire trouvé dans target/surefire-reports/"
+                        }
+                    }
                 }
                 success {
                     archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
@@ -128,7 +147,21 @@ pipeline {
             }
             post {
                 always {
-                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true
+                    script {
+                        // Vérifier que les rapports existent avant de les archiver
+                        def reportsExist = sh(
+                            script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1',
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (reportsExist) {
+                            echo "[IT] 📊 Archivage des résultats de tests d'intégration..."
+                            sh 'ls -la target/failsafe-reports/*.xml || true'
+                            junit testResults: 'target/failsafe-reports/TEST-*.xml', allowEmptyResults: true, keepLongStdio: true
+                        } else {
+                            echo "[IT] ⚠️  Aucun rapport de test d'intégration trouvé dans target/failsafe-reports/"
+                        }
+                    }
                 }
             }
         }
