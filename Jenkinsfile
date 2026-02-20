@@ -83,6 +83,7 @@ pipeline {
         // ArgoCD doit être accessible via port-forward qui écoute sur toutes les interfaces (--address 0.0.0.0)
         // Utilisez: kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80
         // OU utilisez le script infra/argocd/port-forward.sh qui expose sur le port 9090
+        ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
         ARGOCD_SERVER        = "host.docker.internal:8084"
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
@@ -454,8 +455,11 @@ pipeline {
 
         stage('🚀 Deploy with ArgoCD') {
             when {
-                // Déployer uniquement sur "main" après push réussi
-                expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' }
+                // Déployer uniquement sur "main" après push réussi ET si ArgoCD est activé
+                expression { 
+                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
+                    env.ARGOCD_ENABLED == "true" 
+                }
             }
             steps {
                 script {
@@ -492,20 +496,23 @@ pipeline {
                                 echo "[ARGOCD] ⚠️  Impossible de se connecter à ${ARGOCD_SERVER}"
                                 echo "═══════════════════════════════════════════════════════════════"
                                 echo ""
-                                echo "ArgoCD n'est pas accessible. Vérifiez que :"
+                                echo "ArgoCD n'est pas accessible. Le déploiement ArgoCD sera ignoré."
                                 echo ""
-                                echo "1. ArgoCD est installé dans le cluster :"
+                                echo "Pour activer le déploiement ArgoCD :"
+                                echo ""
+                                echo "1. Installez ArgoCD dans le cluster :"
                                 echo "   cd ~/Documents/projets/infra/argocd && ./run.sh"
                                 echo ""
-                                echo "2. Le port-forward est actif et écoute sur toutes les interfaces :"
+                                echo "2. Démarrez le port-forward (écoute sur toutes les interfaces) :"
                                 echo "   kubectl port-forward --address 0.0.0.0,:: svc/argocd-server -n argocd 8084:80"
                                 echo ""
                                 echo "OU utilisez le script (expose sur port 9090) :"
                                 echo "   cd ~/Documents/projets/infra/argocd && ./port-forward.sh"
                                 echo "   (mettez à jour ARGOCD_SERVER=host.docker.internal:9090 dans le Jenkinsfile)"
                                 echo ""
-                                echo "3. Le port-forward écoute bien sur toutes les interfaces (--address 0.0.0.0,::)"
-                                echo "   pour être accessible depuis le conteneur Jenkins via host.docker.internal"
+                                echo "3. Vérifiez que le port-forward écoute sur toutes les interfaces (--address 0.0.0.0,::)"
+                                echo ""
+                                echo "Pour désactiver ce stage, mettez ARGOCD_ENABLED=false dans le Jenkinsfile"
                                 echo ""
                                 echo "═══════════════════════════════════════════════════════════════"
                                 exit 1
