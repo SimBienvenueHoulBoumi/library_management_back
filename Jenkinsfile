@@ -33,7 +33,10 @@ pipeline {
         SONAR_CRED         = 'SONARTOKEN'
         SONAR_PROJECT_KEY  = 'library-management'
 
-        FAIL_ON_SONAR      = 'false'
+        // FAIL_ON_SONAR contrôle si le build échoue en cas d'échec du quality gate
+        // true = le build échoue si le quality gate échoue
+        // false = le build continue même si le quality gate échoue (warning seulement)
+        FAIL_ON_SONAR      = 'true'
         FAIL_ON_SNYK       = 'false'
         FAIL_ON_TRIVY      = 'false'
 
@@ -143,15 +146,30 @@ pipeline {
             }
             steps {
                 withCredentials([string(credentialsId: SONAR_CRED, variable: 'TOKEN')]) {
-                    sh """
-                        ./mvnw sonar:sonar \
-                            -Dsonar.host.url=${SONAR_URL} \
-                            -Dsonar.token=${TOKEN} \
-                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                            -Dsonar.projectVersion=${env.PROJECT_VERSION} \
-                            -Dsonar.qualitygate.wait=${FAIL_ON_SONAR} \
-                            -DskipTests
-                    """
+                    script {
+                        // Toujours attendre le quality gate (true)
+                        // FAIL_ON_SONAR contrôle si on échoue le build en cas d'échec
+                        def qualityGateWait = 'true'
+                        def shouldFail = FAIL_ON_SONAR == 'true'
+                        
+                        sh """
+                            ./mvnw sonar:sonar \
+                                -Dsonar.host.url=${SONAR_URL} \
+                                -Dsonar.token=${TOKEN} \
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                -Dsonar.projectVersion=${env.PROJECT_VERSION} \
+                                -Dsonar.qualitygate.wait=${qualityGateWait} \
+                                -DskipTests || {
+                                    if [ "${shouldFail}" = "true" ]; then
+                                        echo "[SONAR] ❌ Quality gate échoué et FAIL_ON_SONAR=true → échec du build"
+                                        exit 1
+                                    else
+                                        echo "[SONAR] ⚠️  Quality gate échoué mais FAIL_ON_SONAR=false → warning seulement"
+                                        exit 0
+                                    fi
+                                }
+                        """
+                    }
                 }
             }
         }
@@ -234,26 +252,79 @@ pipeline {
             }
         }
 
-        stage('🚀 GitOps – Trigger ArgoCD') {
+        stage('🚀 GitOps – ArgoCD') {
             when {
                 allOf {
                     expression { ARGOCD_ENABLED == 'true' }
                     expression { shouldBuildAndPush() }
                 }
             }
-            steps {
-                withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                    script {
-                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+            stages {
+                stage('🔐 ArgoCD Login') {
+                    steps {
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                            script {
+                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
-                        sh """
-                            argocd login ${host} \
-                                --username admin \
-                                --password '${ARGOCD_PASS}' \
-                                --plaintext --insecure
+                                sh """
+                                    echo "[ARGOCD] Connexion à ${host}..."
+                                    yes | argocd login ${host} \\
+                                        --username admin \\
+                                        --password "\${ARGOCD_PASS}" \\
+                                        --plaintext \\
+                                        --grpc-web \\
+                                        --insecure || {
+                                        echo "[ARGOCD] ❌ Échec de connexion"
+                                        exit 1
+                                    }
+                                    echo "[ARGOCD] ✅ Connexion réussie"
+                                """
+                            }
+                        }
+                    }
+                }
 
-                            argocd app sync ${ARGOCD_APP} --force || true
-                        """
+                stage('📱 ArgoCD App Check') {
+                    steps {
+                        script {
+                            def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+
+                            sh """
+                                echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
+                                if argocd app get ${ARGOCD_APP} &>/dev/null; then
+                                    echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
+                                    argocd app get ${ARGOCD_APP} --grpc-web
+                                else
+                                    echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
+                                    echo "[ARGOCD]    Créez-la manuellement ou via le stage ArgoCD complet"
+                                    exit 0
+                                fi
+                            """
+                        }
+                    }
+                }
+
+                stage('🔄 ArgoCD Sync') {
+                    steps {
+                        script {
+                            def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+
+                            sh """
+                                echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
+                                if argocd app get ${ARGOCD_APP} &>/dev/null; then
+                                    argocd app sync ${ARGOCD_APP} \\
+                                        --grpc-web \\
+                                        --force || {
+                                        echo "[ARGOCD] ⚠️  Échec de la synchronisation"
+                                        exit 1
+                                    }
+                                    echo "[ARGOCD] ✅ Application synchronisée avec succès"
+                                else
+                                    echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
+                                    exit 0
+                                fi
+                            """
+                        }
                     }
                 }
             }
