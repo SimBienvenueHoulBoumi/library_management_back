@@ -148,7 +148,7 @@ pipeline {
                             """
                         }
                     }
-                    post { always { archiveArtifacts 'reports/snyk/**', allowEmptyArchive: true } }
+                    post { always { archiveArtifacts artifacts: 'reports/snyk/**', allowEmptyArchive: true } }
                 }
 
                 stage('Trivy') {
@@ -161,7 +161,7 @@ pipeline {
                                 ${IMAGE_REPO}:${BUILD_NUMBER}
                         """
                     }
-                    post { always { archiveArtifacts 'reports/trivy/**', allowEmptyArchive: true } }
+                    post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
                 }
             }
         }
