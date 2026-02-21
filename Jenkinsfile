@@ -289,6 +289,10 @@ pipeline {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                // Convertir l'URL SSH en HTTPS pour ArgoCD (en Groovy pour éviter les problèmes d'interpolation)
+                                def gitRepoHttps = GIT_REPO_URL
+                                    .replace('git@github.com:', 'https://github.com/')
+                                    .replaceAll(/\.git$/, '') + '.git'
 
                                 sh """
                                     # Vérifier si la session est toujours valide, sinon se reconnecter
@@ -315,18 +319,13 @@ pipeline {
                                         echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
                                         echo "[ARGOCD]    Tentative de création..."
                                         
-                                        # Convertir l'URL SSH en HTTPS pour ArgoCD
-                                        GIT_REPO_SSH="${GIT_REPO_URL}"
-                                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
-                                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
-                                        
-                                        echo "[ARGOCD] URL Git: \${GIT_REPO_HTTPS}"
+                                        echo "[ARGOCD] URL Git: ${gitRepoHttps}"
                                         echo "[ARGOCD] Chart path: ${ARGOCD_CHART_PATH}"
                                         
                                         # Vérifier si le repo existe dans ArgoCD
-                                        if ! argocd repo get "\${GIT_REPO_HTTPS}" --grpc-web &>/dev/null; then
+                                        if ! argocd repo get "${gitRepoHttps}" --grpc-web &>/dev/null; then
                                             echo "[ARGOCD] Ajout du repository Git..."
-                                            argocd repo add "\${GIT_REPO_HTTPS}" \\
+                                            argocd repo add "${gitRepoHttps}" \\
                                                 --name ${PROJECT_NAME}-repo \\
                                                 --insecure-skip-server-verification --grpc-web || {
                                                 echo "[ARGOCD] ⚠️  Échec de l'ajout du repository (peut-être déjà existant)"
@@ -335,7 +334,7 @@ pipeline {
                                         
                                         # Créer l'application
                                         argocd app create ${ARGOCD_APP} \\
-                                            --repo "\${GIT_REPO_HTTPS}" \\
+                                            --repo "${gitRepoHttps}" \\
                                             --path ${ARGOCD_CHART_PATH} \\
                                             --dest-server https://kubernetes.default.svc \\
                                             --dest-namespace ${ARGOCD_NS} \\
