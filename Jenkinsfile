@@ -209,13 +209,28 @@ pipeline {
             when { expression { shouldBuildAndPush() } }
             parallel {
                 stage('Snyk') {
-            steps {
+                    steps {
                         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'TOKEN')]) {
                             sh """
-                        mkdir -p reports/snyk
+                                # Snyk CLI version 1.962.0+ scanne automatiquement les vulnérabilités d'application
+                                # (OS + dépendances applicatives comme pom.xml, package.json, etc.)
+                                # Pour exclure les vulnérabilités d'application, utiliser: --exclude-app-vulns
+                                mkdir -p reports/snyk
+                                
+                                # Test de sécurité: scanne OS + application dependencies par défaut
                                 snyk container test ${IMAGE_REPO}:${BUILD_NUMBER} \
                                     --json-file-output=reports/snyk/snyk.json \
-                                    --severity-threshold=high || echo "Snyk issues found (fail=${FAIL_ON_SNYK})"
+                                    --severity-threshold=high || {
+                                    if [ "${FAIL_ON_SNYK}" = "true" ]; then
+                                        echo "[SNYK] ❌ Vulnérabilités détectées et FAIL_ON_SNYK=true → échec du build"
+                                        exit 1
+                                    else
+                                        echo "[SNYK] ⚠️  Vulnérabilités détectées mais FAIL_ON_SNYK=false → warning seulement"
+                                        exit 0
+                                    fi
+                                }
+                                
+                                # Monitor: envoie les résultats à Snyk pour suivi continu
                                 snyk container monitor ${IMAGE_REPO}:${BUILD_NUMBER} || true
                             """
                         }
