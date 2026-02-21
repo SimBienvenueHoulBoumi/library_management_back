@@ -287,11 +287,9 @@ pipeline {
                 stage('📱 ArgoCD App Check') {
                     steps {
                         script {
-                            def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-
                             sh """
                                 echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
-                                if argocd app get ${ARGOCD_APP} &>/dev/null; then
+                                if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
                                     echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
                                     argocd app get ${ARGOCD_APP} --grpc-web
                                 else
@@ -307,11 +305,9 @@ pipeline {
                 stage('🔄 ArgoCD Sync') {
                     steps {
                         script {
-                            def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-
                             sh """
                                 echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
-                                if argocd app get ${ARGOCD_APP} &>/dev/null; then
+                                if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
                                     argocd app sync ${ARGOCD_APP} \\
                                         --grpc-web \\
                                         --force || {
