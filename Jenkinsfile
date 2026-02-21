@@ -1,740 +1,238 @@
-// Pipeline CI/CD pour "library-management"
-// 1) Checkout + lecture version Maven
-// 2) Tests unitaires + build
-// 3) Tests d'intégration
-// 4) Analyse SonarQube
-// 5) Build & tag Docker (BUILD / SHA / VERSION)
-// 6) Scans sécurité (Snyk, Trivy)
-// 7) Push image vers Nexus (seulement sur main)
-// 8) Nettoyage local des images
+// ======================================================================
+// Pipeline CI/CD – library-management
+// Modern & Maintainable version – 2025/2026 practices
+// ======================================================================
 pipeline {
-    agent {
-        node {
-            label 'jenkins-agent'
-        }
-    }
+    agent { node { label 'jenkins-agent' } }
 
     options {
-        // Garder uniquement les 10 derniers builds et leurs artefacts
-        buildDiscarder(logRotator(
-            numToKeepStr: '10',
-            artifactNumToKeepStr: '10',
-            daysToKeepStr: '30'  // Supprimer les builds de plus de 30 jours même s'il y en a moins de 10
-        ))
-        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5', daysToKeepStr: '30'))
+        timeout(time: 45, unit: 'MINUTES')
         timestamps()
+        disableConcurrentBuilds(abortPrevious: true)
         skipDefaultCheckout(true)
     }
 
     environment {
-        // --- Identité applicative ---
-        APP_NAME        = "library-management"
-        PROJECT_NAME    = "library-management"
-        PROJECT_VERSION = ""
+        // ─── Application ────────────────────────────────────────────────
+        APP_NAME           = 'library-management'
+        PROJECT_NAME       = 'test-app'
+        PROJECT_VERSION    = ''
 
-        // --- SCM (GitHub) ---
-        // BRANCH_NAME (multibranch) sinon "main"
-        GIT_REPO_URL    = "git@github.com:SimBienvenueHoulBoumi/library_management_back.git"
-        GIT_BRANCH      = "${BRANCH_NAME ?: 'main'}"
-        GIT_CRED_ID     = "JENKINS_AGENT"
+        // ─── SCM ────────────────────────────────────────────────────────
+        GIT_REPO_URL       = 'git@github.com:SimBienvenueHoulBoumi/library_management_back.git'
+        GIT_CREDENTIALS    = 'JENKINS_AGENT'
 
-        // --- Docker / Nexus (même machine que Jenkins / ArgoCD) ---
-        // Note: Nexus utilise HTTP (pas HTTPS), configurez Docker daemon.json avec insecure-registries
-        // L'agent Jenkins monte /var/run/docker.sock, donc il utilise le daemon Docker de l'hôte (Mac)
-        // Depuis le daemon Docker de l'hôte, on doit utiliser localhost:8083 ou host.docker.internal:8083
-        // On essaie dans l'ordre: localhost:8083, puis host.docker.internal:8083
-        NEXUS_REGISTRY  = "localhost:8083"
-        NEXUS_REGISTRY_FALLBACK = "host.docker.internal:8083"
-        AUTHORITY       = "simdev"
-        IMAGE_REPO      = "${NEXUS_REGISTRY}/${AUTHORITY}/${PROJECT_NAME}"
+        // ─── Container Registry ─────────────────────────────────────────
+        NEXUS_REGISTRY     = 'localhost:8083'  // ← À sécuriser / passer en HTTPS si possible
+        REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
+        IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
 
-        // Tags "locaux" (sans registry)
-        IMAGE_TAG_BUILD   = "${APP_NAME}:${BUILD_NUMBER}"
-        IMAGE_TAG_SHA     = ""
-        IMAGE_TAG_VERSION = "${APP_NAME}:${PROJECT_VERSION}"
+        // ─── Quality & Security ─────────────────────────────────────────
+        SONAR_URL          = 'http://sonarqube:9000'
+        SONAR_CRED         = 'SONARTOKEN'
+        SONAR_PROJECT_KEY  = 'library-management'
 
-        NEXUS_CREDENTIALS = "NEXUS_CREDENTIALS"
+        FAIL_ON_SONAR      = 'false'
+        FAIL_ON_SNYK       = 'false'
+        FAIL_ON_TRIVY      = 'false'
 
-        // --- SonarQube (analyse qualité) ---
-        SONAR_SERVER       = "SonarQube"
-        SONAR_URL          = "http://sonarqube:9000"
-        SONAR_PROJECT_KEY  = "library-management"
-        SONAR_PROJECT_NAME = "library-management"
-        SONAR_PROJECT_VERSION = ""
-        SONAR_SOURCES = "src/"
-        SONAR_JAVA_BINARIES = "target/classes"
-        SONAR_JUNIT_REPORTS_PATH = "target/surefire-reports/"
-        SONAR_COVERAGE_JACOCO_XML_REPORT_PATHS = "target/jacoco/jacoco.xml"
-        SONAR_JAVA_CHECKSTYLE_REPORT_PATHS = "target/checkstyle-result.xml"
-        SONAR_EXCLUSIONS = "**/target/**,**/test/**,**/*.json,**/*.yml"
-
-        // --- Outils sécurité (Snyk / Trivy) ---
-        SNYK_CLI          = "snyk"
-        SNYK_ORG          = "967f8e17-af81-450e-98d1-e19b3e27f316"
-        SNYK_PROJECT_NAME_CONTAINER = "library-management-container"
-
-        // --- Feature flags de durcissement (ON/OFF) ---
-        FAIL_ON_SONAR_QGATE  = "false"
-        FAIL_ON_SNYK_VULNS   = "false"
-        FAIL_ON_TRIVY_VULNS  = "false"
-
-        // --- ArgoCD (déploiement Kubernetes) ---
-        // ArgoCD est accessible via le service nginx proxy (argocd-proxy) dans docker-compose
-        // Le service argocd-proxy fait proxy vers ArgoCD (NodePort 30080 ou port-forward 8084)
-        // Pour démarrer ArgoCD: cd infra && ./start-argocd.sh
-        // Pour démarrer le service proxy: docker compose up -d argocd-proxy
-        ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
-        ARGOCD_SERVER        = "argocd-proxy:8084"  // Service nginx proxy dans docker-compose (même réseau Docker)
-        ARGOCD_APP_NAME      = "${PROJECT_NAME}"
-        ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
-        ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
-        ARGOCD_CHART_PATH    = "kubernetes/charts/${PROJECT_NAME}"  // Chemin vers le chart Helm dans le repo
+        // ─── GitOps (ArgoCD) ────────────────────────────────────────────
+        ARGOCD_ENABLED     = 'true'
+        ARGOCD_SERVER      = 'argocd-proxy:8084'   // ou ingress avec TLS
+        ARGOCD_CRED        = 'ARGOCD_PASSWORD'
+        ARGOCD_APP         = "${PROJECT_NAME}"
+        ARGOCD_NS          = 'default'
+        ARGOCD_CHART_PATH  = "kubernetes/charts/${PROJECT_NAME}"
     }
 
     stages {
 
-        stage('📥 Checkout') {
-            // Nettoyage workspace + checkout Git + lecture de la version Maven
+        stage('📥 Checkout & Detect Version') {
             steps {
                 deleteDir()
-                git branch: "${GIT_BRANCH}",
-                    url: "${GIT_REPO_URL}",
-                    credentialsId: "${GIT_CRED_ID}"
+                git branch: BRANCH_NAME ?: 'main',
+                    url: GIT_REPO_URL,
+                    credentialsId: GIT_CREDENTIALS
 
                 script {
-                    def v = sh(
-                        script: './mvnw help:evaluate -Dexpression=project.version -q -DforceStdout',
-                        returnStdout: true
-                    ).trim()
-
-                    env.PROJECT_VERSION = v
-                    env.SONAR_PROJECT_VERSION = v
-
-                    echo "Version Maven détectée : ${env.PROJECT_VERSION}"
+                    PROJECT_VERSION = sh(script: './mvnw help:evaluate -Dexpression=project.version -q -DforceStdout', returnStdout: true).trim()
+                    echo "Maven version detected: ${PROJECT_VERSION}"
                 }
             }
         }
 
-        stage('🧪 Unit Tests & Build') {
-            // Tests unitaires + build du jar (sans tests d'intégration)
-            steps {
-                sh './mvnw clean verify -DskipITs=true -DskipUnitTests=false'
-            }
-            post {
-                always {
-                    script {
-                        // Vérifier que les rapports existent avant de les archiver
-                        def reportsExist = sh(
-                            script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1',
-                            returnStatus: true
-                        ) == 0
-                        
-                        if (reportsExist) {
-                            echo "[UT] 📊 Archivage des résultats de tests unitaires..."
-                            sh 'ls -la target/surefire-reports/*.xml || true'
-                            junit testResults: 'target/surefire-reports/TEST-*.xml', allowEmptyResults: true, keepLongStdio: true
-                        } else {
-                            echo "[UT] ⚠️  Aucun rapport de test unitaire trouvé dans target/surefire-reports/"
+        stage('🧪 Tests') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        sh './mvnw clean test -DskipITs'
+                    }
+                    post {
+                        always {
+                            junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
                         }
                     }
                 }
-                success {
-                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                }
-            }
-        }
 
-        stage('🔗 Integration Tests (IT)') {
-            // Tests d'intégration (Failsafe), les TU sont déjà exécutés
-            steps {
-                sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
-            }
-            post {
-                always {
-                    script {
-                        // Vérifier que les rapports existent avant de les archiver
-                        def reportsExist = sh(
-                            script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1',
-                            returnStatus: true
-                        ) == 0
-                        
-                        if (reportsExist) {
-                            echo "[IT] 📊 Archivage des résultats de tests d'intégration..."
-                            sh 'ls -la target/failsafe-reports/*.xml || true'
-                            junit testResults: 'target/failsafe-reports/TEST-*.xml', allowEmptyResults: true, keepLongStdio: true
-                        } else {
-                            echo "[IT] ⚠️  Aucun rapport de test d'intégration trouvé dans target/failsafe-reports/"
+                stage('Integration Tests') {
+                    steps {
+                        sh './mvnw verify -DskipUnitTests'
+                    }
+                    post {
+                        always {
+                            junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true
                         }
                     }
                 }
             }
         }
 
-        stage('📊 SonarQube') {
-            // Analyse qualité (SonarQube) avec Quality Gate optionnelle
+        stage('📊 Quality – SonarQube') {
+            when {
+                anyOf {
+                    branch 'main'
+                    changeRequest()
+                }
+            }
             steps {
-                echo '[Étape 1] Vérification DNS SonarQube'
-                sh '''
-                    echo "[INFO] Test DNS SonarQube avec curl"
-                    curl -s -o /dev/null -w "%{http_code}\\n" "$SONAR_URL/api/system/status" || echo "ECHEC"
-                '''
-
-                echo '[Étape 2] Analyse SonarQube'
-                withCredentials([string(credentialsId: 'SONARTOKEN', variable: 'SONAR_TOKEN')]) {
-                    sh '''
+                withCredentials([string(credentialsId: SONAR_CRED, variable: 'TOKEN')]) {
+                    sh """
                         ./mvnw sonar:sonar \
-                          -Dsonar.host.url="$SONAR_URL" \
-                          -Dsonar.token="$SONAR_TOKEN" \
-                          -Dsonar.projectKey=$SONAR_PROJECT_KEY \
-                          -Dsonar.projectName=$SONAR_PROJECT_NAME \
-                          -Dsonar.projectVersion=$SONAR_PROJECT_VERSION \
-                          -Dsonar.sources=$SONAR_SOURCES \
-                          -Dsonar.java.binaries=$SONAR_JAVA_BINARIES \
-                          -Dsonar.junit.reportsPath=$SONAR_JUNIT_REPORTS_PATH \
-                          -Dsonar.coverage.jacoco.xmlReportPaths=$SONAR_COVERAGE_JACOCO_XML_REPORT_PATHS \
-                          -Dsonar.java.checkstyle.reportPaths=$SONAR_JAVA_CHECKSTYLE_REPORT_PATHS \
-                          -Dsonar.exclusions=$SONAR_EXCLUSIONS \
-                          -Dsonar.qualitygate.wait=$FAIL_ON_SONAR_QGATE \
-                          -DskipTests
-                    '''
-                }
-            }
-        }
-
-        stage('🐳 Docker Build & Tag') {
-            // Build de l'image Docker et tagging (BUILD / SHA / VERSION)
-            steps {
-                script {
-                    def commit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-
-                    env.IMAGE_TAG_BUILD   = "${APP_NAME}:${BUILD_NUMBER}"
-                    env.IMAGE_TAG_SHA     = "${APP_NAME}:${commit}"
-                    env.IMAGE_TAG_VERSION = "${APP_NAME}:${env.PROJECT_VERSION}"
-
-                    env.IMAGE_NAME_BUILD   = "${IMAGE_REPO}:${BUILD_NUMBER}"
-                    env.IMAGE_NAME_SHA     = "${IMAGE_REPO}:${commit}"
-                    env.IMAGE_NAME_VERSION = "${IMAGE_REPO}:${env.PROJECT_VERSION}"
-
-                    sh """
-                        docker build \\
-                          -t ${IMAGE_NAME_BUILD} \\
-                          -t ${IMAGE_NAME_SHA} \\
-                          -t ${IMAGE_NAME_VERSION} \\
-                          .
+                            -Dsonar.host.url=${SONAR_URL} \
+                            -Dsonar.token=${TOKEN} \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.projectVersion=${PROJECT_VERSION} \
+                            -Dsonar.qualitygate.wait=${FAIL_ON_SONAR} \
+                            -DskipTests
                     """
                 }
             }
         }
 
-        stage('🔐 Snyk Scan') {
-            // Scan de vulnérabilités avec Snyk (container)
-            steps {
-                withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-                    sh '''
-                        set +e
-                        mkdir -p reports/snyk
-
-                        export SNYK_TOKEN="$SNYK_TOKEN"
-
-                        IMAGE_TO_SCAN="${IMAGE_NAME_BUILD}"
-
-                        echo "[SNYK] Lancement snyk container test sur ${IMAGE_TO_SCAN}..."
-                        ${SNYK_CLI} container test "${IMAGE_TO_SCAN}" --severity-threshold=high --org="$SNYK_ORG" --json > reports/snyk/snyk-report.json
-                        SNYK_EXIT=$?
-
-                        echo "[SNYK] Lancement snyk container monitor..."
-                        ${SNYK_CLI} container monitor "${IMAGE_TO_SCAN}" --org="$SNYK_ORG" --project-name="$SNYK_PROJECT_NAME_CONTAINER" || true
-
-                        # Génération du rapport HTML si le script existe dans le repo
-                        if [ -f scripts/generate_snyk_report.py ]; then
-                          echo "[SNYK] Génération rapport HTML..."
-                          python3 scripts/generate_snyk_report.py || true
-                        else
-                          echo "[SNYK] Script scripts/generate_snyk_report.py absent - seul le JSON sera archivé."
-                        fi
-
-                        if [ "$FAIL_ON_SNYK_VULNS" = "true" ] && [ "$SNYK_EXIT" -ne 0 ]; then
-                          echo "[SNYK] Vulnérabilités détectées et FAIL_ON_SNYK_VULNS=true -> échec pipeline"
-                          exit "$SNYK_EXIT"
-                        else
-                          echo "[SNYK] Exit code = $SNYK_EXIT (FAIL_ON_SNYK_VULNS=$FAIL_ON_SNYK_VULNS)"
-                          exit 0
-                        fi
-                    '''
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'reports/snyk/**', allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('🔬 Trivy') {
-            // Scan de vulnérabilités avec Trivy (container)
-            steps {
-                sh '''
-                    set +e
-                    mkdir -p reports/trivy
-
-                    echo "[TRIVY] Scan de l'image ${IMAGE_NAME_BUILD} (CRITICAL,HIGH)..."
-                    trivy image --severity CRITICAL,HIGH --format json --exit-code 1 \
-                      -o reports/trivy/trivy-report.json ${IMAGE_NAME_BUILD}
-                    TRIVY_EXIT=$?
-
-                    # Génération du rapport HTML si le script existe dans le repo
-                    if [ -f scripts/generate_trivy_report.py ]; then
-                      echo "[TRIVY] Génération rapport HTML..."
-                      python3 scripts/generate_trivy_report.py || true
-                    else
-                      echo "[TRIVY] Script scripts/generate_trivy_report.py absent - seul le JSON sera archivé."
-                    fi
-
-                    if [ "$FAIL_ON_TRIVY_VULNS" = "true" ] && [ "$TRIVY_EXIT" -ne 0 ]; then
-                      echo "[TRIVY] Vulnérabilités détectées et FAIL_ON_TRIVY_VULNS=true -> échec pipeline"
-                      exit "$TRIVY_EXIT"
-                    else
-                      echo "[TRIVY] Exit code = $TRIVY_EXIT (FAIL_ON_TRIVY_VULNS=$FAIL_ON_TRIVY_VULNS)"
-                      exit 0
-                    fi
-                '''
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('📦 Push to Nexus') {
-            when {
-                // Push de l'image uniquement sur "main" (branches feature = CI only)
-                expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' }
-            }
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: "${NEXUS_CREDENTIALS}",
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh '''
-                        # Nexus utilise HTTP (pas HTTPS), Docker doit être configuré pour accepter ce registry comme insecure
-                        # Si vous obtenez l'erreur "server gave HTTP response to HTTPS client", configurez Docker daemon.json
-                        echo "[DOCKER] 🔍 Diagnostic Docker..."
-                        echo "[DOCKER] OS: $(uname -a)"
-                        echo "[DOCKER] Docker version: $(docker --version || echo 'N/A')"
-                        echo "[DOCKER] Registry cible: ${NEXUS_REGISTRY}"
-                        
-                        # Vérifier la configuration Docker
-                        echo "[DOCKER] Configuration Docker actuelle:"
-                        if docker info 2>/dev/null | grep -i "insecure" || docker info 2>/dev/null | grep -i "registry"; then
-                            docker info 2>/dev/null | grep -i "insecure" || docker info 2>/dev/null | grep -i "registry" || echo "  (aucune config insecure-registries trouvée)"
-                        else
-                            echo "  ⚠️  Aucune configuration 'insecure-registries' détectée"
-                        fi
-                        
-                        # Vérifier si daemon.json existe
-                        if [ -f /etc/docker/daemon.json ]; then
-                            echo "[DOCKER] Fichier /etc/docker/daemon.json trouvé:"
-                            cat /etc/docker/daemon.json | head -20
-                        else
-                            echo "[DOCKER] ⚠️  /etc/docker/daemon.json n'existe pas"
-                        fi
-                        
-                        echo "[DOCKER] Tentative de connexion à ${NEXUS_REGISTRY}..."
-                        
-                        # Essayer d'abord avec localhost:8083, puis host.docker.internal:8083 en fallback
-                        # L'agent utilise le daemon Docker de l'hôte via /var/run/docker.sock
-                        REGISTRY_TO_USE="${NEXUS_REGISTRY}"
-                        LOGIN_SUCCESS=false
-                        
-                        if echo "$PASS" | docker login ${NEXUS_REGISTRY} -u "$USER" --password-stdin 2>&1; then
-                            echo "[DOCKER] ✅ Connexion réussie avec ${NEXUS_REGISTRY}"
-                            LOGIN_SUCCESS=true
-                        else
-                            echo "[DOCKER] ⚠️  Échec avec ${NEXUS_REGISTRY}, tentative avec ${NEXUS_REGISTRY_FALLBACK}..."
-                            if echo "$PASS" | docker login ${NEXUS_REGISTRY_FALLBACK} -u "$USER" --password-stdin 2>&1; then
-                                echo "[DOCKER] ✅ Connexion réussie avec ${NEXUS_REGISTRY_FALLBACK}"
-                                REGISTRY_TO_USE="${NEXUS_REGISTRY_FALLBACK}"
-                                LOGIN_SUCCESS=true
-                            fi
-                        fi
-                        
-                        if [ "$LOGIN_SUCCESS" = false ]; then
-                            echo ""
-                            echo "═══════════════════════════════════════════════════════════════"
-                            echo "[DOCKER] ❌ ÉCHEC DE CONNEXION"
-                            echo "═══════════════════════════════════════════════════════════════"
-                            echo ""
-                            echo "Problème: Docker essaie HTTPS alors que Nexus utilise HTTP"
-                            echo "Registries testés: ${NEXUS_REGISTRY} et ${NEXUS_REGISTRY_FALLBACK}"
-                            echo ""
-                            echo "🔧 SOLUTION: Configurez Docker daemon.json sur l'HÔTE DOCKER (Mac)"
-                            echo ""
-                            echo "L'agent Jenkins monte /var/run/docker.sock, donc il utilise le daemon Docker de l'hôte."
-                            echo "Vous devez configurer Docker Desktop sur votre Mac."
-                            echo ""
-                            
-                            # Détecter l'OS (utiliser [ au lieu de [[ pour compatibilité sh)
-                            OS_TYPE=$(uname)
-                            if [ "$OS_TYPE" = "Darwin" ]; then
-                                echo "📱 Détecté: macOS (Docker Desktop)"
-                                echo ""
-                                echo "1. Ouvrez Docker Desktop"
-                                echo "2. Allez dans Settings (⚙️) > Docker Engine"
-                                echo "3. Ajoutez/modifiez la configuration JSON:"
-                                echo ""
-                                echo '   {'
-                                echo '     "insecure-registries": ['
-                                echo '       "localhost:8083",'
-                                echo '       "host.docker.internal:8083"'
-                                echo '     ]'
-                                echo '   }'
-                                echo ""
-                                echo "4. Cliquez sur 'Apply & Restart'"
-                                echo "5. Attendez que Docker redémarre complètement (30-60 secondes)"
-                                echo "6. Vérifiez: docker info | grep -i insecure"
-                            else
-                                echo "🐧 Détecté: Linux (agent dans conteneur, Docker de l'hôte)"
-                                echo ""
-                                echo "L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock"
-                                echo "Vous devez configurer Docker Desktop sur votre Mac (hôte):"
-                                echo ""
-                                echo "1. Ouvrez Docker Desktop"
-                                echo "2. Allez dans Settings (⚙️) > Docker Engine"
-                                echo "3. Ajoutez/modifiez la configuration JSON:"
-                                echo ""
-                                echo '   {'
-                                echo '     "insecure-registries": ['
-                                echo '       "localhost:8083",'
-                                echo '       "host.docker.internal:8083"'
-                                echo '     ]'
-                                echo '   }'
-                                echo ""
-                                echo "4. Cliquez sur 'Apply & Restart'"
-                                echo "5. Attendez que Docker redémarre complètement (30-60 secondes)"
-                                echo "6. Vérifiez: docker info | grep -i insecure"
-                            fi
-                            echo ""
-                            echo "═══════════════════════════════════════════════════════════════"
-                            exit 1
-                        fi
-
-                        # Reconstruire les noms d'images avec le registry qui a fonctionné
-                        # Si le registry a changé, on doit retagger les images
-                        if [ "${REGISTRY_TO_USE}" != "${NEXUS_REGISTRY}" ]; then
-                            echo "[DOCKER] Retagging images avec le nouveau registry ${REGISTRY_TO_USE}..."
-                            # Extraire les tags depuis les noms d'images existants
-                            TAG_BUILD=$(echo ${IMAGE_NAME_BUILD} | cut -d: -f2)
-                            TAG_SHA=$(echo ${IMAGE_NAME_SHA} | cut -d: -f2)
-                            TAG_VERSION=$(echo ${IMAGE_NAME_VERSION} | cut -d: -f2)
-                            
-                            NEW_IMAGE_BUILD="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_BUILD}"
-                            NEW_IMAGE_SHA="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_SHA}"
-                            NEW_IMAGE_VERSION="${REGISTRY_TO_USE}/${AUTHORITY}/${PROJECT_NAME}:${TAG_VERSION}"
-                            
-                            docker tag ${IMAGE_NAME_BUILD} ${NEW_IMAGE_BUILD}
-                            docker tag ${IMAGE_NAME_SHA} ${NEW_IMAGE_SHA}
-                            docker tag ${IMAGE_NAME_VERSION} ${NEW_IMAGE_VERSION}
-                            
-                            IMAGE_NAME_BUILD=${NEW_IMAGE_BUILD}
-                            IMAGE_NAME_SHA=${NEW_IMAGE_SHA}
-                            IMAGE_NAME_VERSION=${NEW_IMAGE_VERSION}
-                        fi
-                        
-                        echo "[DOCKER] Pushing images vers ${REGISTRY_TO_USE}..."
-                        docker push ${IMAGE_NAME_BUILD}
-                        docker push ${IMAGE_NAME_SHA}
-                        docker push ${IMAGE_NAME_VERSION}
-
-                        docker logout ${REGISTRY_TO_USE}
-                    '''
-                }
-            }
-        }
-
-        stage('🔧 ArgoCD CLI Check') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
-                }
-            }
+        stage('🐳 Build & Tag Docker Image') {
+            when { expression { shouldBuildAndPush() } }
             steps {
                 script {
-                    def argocdAvailable = sh(
-                        script: 'which argocd || command -v argocd',
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (!argocdAvailable) {
-                        sh '''
-                            ARCH=$(uname -m)
-                            if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-                                ARGOCD_ARCH="arm64"
-                            else
-                                ARGOCD_ARCH="amd64"
-                            fi
-                            curl -sSL -o /tmp/argocd-linux-${ARGOCD_ARCH} https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-${ARGOCD_ARCH}
-                            sudo install -m 555 /tmp/argocd-linux-${ARGOCD_ARCH} /usr/local/bin/argocd
-                            rm /tmp/argocd-linux-${ARGOCD_ARCH}
-                        '''
+                    def commitShort = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+
+                    env.IMAGE_TAGS = [
+                        BUILD_NUMBER,
+                        commitShort,
+                        PROJECT_VERSION
+                    ]
+
+                    env.FULL_IMAGES = env.IMAGE_TAGS.collect { tag ->
+                        "${IMAGE_REPO}:${tag}"
                     }
-                }
-            }
-        }
 
-        stage('🔌 ArgoCD Connectivity') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
-                }
-            }
-            steps {
-                sh """
-                    # Extraire HOST et PORT de l'URL (peut contenir http:// ou https://)
-                    ARGOCD_URL="${env.ARGOCD_SERVER}"
-                    # Retirer le préfixe http:// ou https://
-                    ARGOCD_HOST=\${ARGOCD_URL#http://}
-                    ARGOCD_HOST=\${ARGOCD_HOST#https://}
-                    HOST=\$(echo \$ARGOCD_HOST | cut -d: -f1)
-                    PORT=\$(echo \$ARGOCD_HOST | cut -d: -f2)
-                    
-                    if ! timeout 5 bash -c "echo > /dev/tcp/\$HOST/\$PORT" 2>/dev/null; then
-                        exit 1
-                    fi
-                """
-            }
-        }
-
-        stage('🔐 ArgoCD Login') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
-                }
-            }
-            steps {
-                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        # Retirer http:// ou https:// de l'URL si présent (ArgoCD CLI n'accepte pas avec --plaintext)
-                        ARGOCD_URL="${env.ARGOCD_SERVER}"
-                        # Retirer le préfixe http:// ou https:// avec sed (plus robuste)
-                        ARGOCD_HOST=\$(echo "\${ARGOCD_URL}" | sed -e 's|^https\\?://||' -e 's|^http://||')
-                        # Debug: afficher l'URL extraite
-                        echo "[ARGOCD] URL originale: \${ARGOCD_URL}"
-                        echo "[ARGOCD] Connexion à: \${ARGOCD_HOST}"
-                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
-                        yes | argocd login "\${ARGOCD_HOST}" \\
-                            --username admin \\
-                            --password "\${ARGOCD_PASS}" \\
-                            --plaintext \\
-                            --grpc-web \\
-                            --insecure || exit 1
+                        docker build -t ${FULL_IMAGES.join(' -t ')} .
                     """
                 }
             }
         }
 
-        stage('📦 ArgoCD Repo Setup') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
+        stage('🔐 Security Scans') {
+            when { expression { shouldBuildAndPush() } }
+            parallel {
+                stage('Snyk') {
+                    steps {
+                        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'TOKEN')]) {
+                            sh """
+                                mkdir -p reports/snyk
+                                snyk container test ${IMAGE_REPO}:${BUILD_NUMBER} \
+                                    --json-file-output=reports/snyk/snyk.json \
+                                    --severity-threshold=high || echo "Snyk issues found (fail=${FAIL_ON_SNYK})"
+                                snyk container monitor ${IMAGE_REPO}:${BUILD_NUMBER} || true
+                            """
+                        }
+                    }
+                    post { always { archiveArtifacts 'reports/snyk/**', allowEmptyArchive: true } }
+                }
+
+                stage('Trivy') {
+                    steps {
+                        sh """
+                            mkdir -p reports/trivy
+                            trivy image --format json --output reports/trivy/trivy.json \
+                                --severity CRITICAL,HIGH \
+                                --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
+                                ${IMAGE_REPO}:${BUILD_NUMBER}
+                        """
+                    }
+                    post { always { archiveArtifacts 'reports/trivy/**', allowEmptyArchive: true } }
                 }
             }
+        }
+
+        stage('📦 Push Images') {
+            when { expression { shouldBuildAndPush() } }
             steps {
-                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
+                withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh """
-                        # Retirer http:// ou https:// de l'URL si présent (ArgoCD CLI n'accepte pas avec --plaintext)
-                        ARGOCD_URL="${env.ARGOCD_SERVER}"
-                        # Retirer le préfixe http:// ou https:// avec sed (plus robuste)
-                        ARGOCD_HOST=\$(echo "\${ARGOCD_URL}" | sed -e 's|^https\\?://||' -e 's|^http://||')
-                        # Debug: afficher l'URL extraite
-                        echo "[ARGOCD] URL originale: \${ARGOCD_URL}"
-                        echo "[ARGOCD] Connexion à: \${ARGOCD_HOST}"
-                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
-                        yes | argocd login "\${ARGOCD_HOST}" \\
-                            --username admin \\
-                            --password "\${ARGOCD_PASS}" \\
-                            --plaintext \\
-                            --grpc-web \\
-                            --insecure || exit 1
-                        
-                        # Convertir l'URL SSH en HTTPS pour ArgoCD (plus simple, pas besoin de SSH_AUTH_SOCK)
-                        GIT_REPO_SSH="${GIT_REPO_URL}"
-                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
-                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
-                        
-                        echo "[ARGOCD] URL SSH: \${GIT_REPO_SSH}"
-                        echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
-                        
-                        # Vérifier si le repo existe déjà (en utilisant l'URL HTTPS)
-                        if ! argocd repo get "\${GIT_REPO_HTTPS}" &>/dev/null; then
-                            echo "[ARGOCD] Ajout du repository Git (HTTPS)..."
-                            # Pour HTTPS, on peut utiliser --insecure-skip-server-verification
-                            # OU configurer des credentials si le repo est privé
-                            argocd repo add "\${GIT_REPO_HTTPS}" \\
-                                --name ${PROJECT_NAME}-repo \\
-                                --insecure-skip-server-verification || {
-                                echo "[ARGOCD] ⚠️  Échec de l'ajout du repo, peut-être privé. Vérifiez les credentials."
-                                exit 1
-                            }
-                        else
-                            echo "[ARGOCD] ✅ Repository déjà configuré"
-                        fi
+                        echo "\${PASS}" | docker login ${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || {
+                            echo "Registry login failed → check insecure-registries on Docker host"
+                            exit 1
+                        }
+
+                        ${FULL_IMAGES.collect { "docker push ${it}" }.join('\n')}
+
+                        docker logout ${NEXUS_REGISTRY}
                     """
                 }
             }
         }
 
-        stage('📱 ArgoCD App Create/Update') {
+        stage('🚀 GitOps – Trigger ArgoCD') {
             when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
+                allOf {
+                    expression { ARGOCD_ENABLED == 'true' }
+                    expression { shouldBuildAndPush() }
                 }
             }
             steps {
-                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
-                    sh """
-                        # Retirer http:// ou https:// de l'URL si présent (ArgoCD CLI n'accepte pas avec --plaintext)
-                        ARGOCD_URL="${env.ARGOCD_SERVER}"
-                        # Retirer le préfixe http:// ou https:// avec sed (plus robuste)
-                        ARGOCD_HOST=\$(echo "\${ARGOCD_URL}" | sed -e 's|^https\\?://||' -e 's|^http://||')
-                        # Debug: afficher l'URL extraite
-                        echo "[ARGOCD] URL originale: \${ARGOCD_URL}"
-                        echo "[ARGOCD] Connexion à: \${ARGOCD_HOST}"
-                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
-                        yes | argocd login "\${ARGOCD_HOST}" \\
-                            --username admin \\
-                            --password "\${ARGOCD_PASS}" \\
-                            --plaintext \\
-                            --grpc-web \\
-                            --insecure || exit 1
-                        
-                        # Convertir l'URL SSH en HTTPS pour ArgoCD
-                        GIT_REPO_SSH="${GIT_REPO_URL}"
-                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
-                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
-                        
-                        echo "[ARGOCD] URL SSH: \${GIT_REPO_SSH}"
-                        echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
-                        
-                        if ! argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
-                            echo "[ARGOCD] Création de l'application ${ARGOCD_APP_NAME}..."
-                            argocd app create ${ARGOCD_APP_NAME} \\
-                                --repo "\${GIT_REPO_HTTPS}" \\
-                                --path ${ARGOCD_CHART_PATH} \\
-                                --dest-server https://kubernetes.default.svc \\
-                                --dest-namespace ${ARGOCD_NAMESPACE} \\
-                                --sync-policy automated \\
-                                --self-heal \\
-                                --auto-prune || {
-                                echo "[ARGOCD] ❌ Échec de la création de l'application"
-                                exit 1
-                            }
-                            echo "[ARGOCD] ✅ Application créée avec succès"
-                        else
-                            echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} existe déjà"
-                        fi
-                    """
-                }
-            }
-        }
+                withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                    script {
+                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
-        stage('🔄 ArgoCD Sync') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
-                }
-            }
-            steps {
-                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
-                    sh """
-                        # Retirer http:// ou https:// de l'URL si présent (ArgoCD CLI n'accepte pas avec --plaintext)
-                        ARGOCD_URL="${env.ARGOCD_SERVER}"
-                        # Retirer le préfixe http:// ou https:// avec sed (plus robuste)
-                        ARGOCD_HOST=\$(echo "\${ARGOCD_URL}" | sed -e 's|^https\\?://||' -e 's|^http://||')
-                        # Debug: afficher l'URL extraite
-                        echo "[ARGOCD] URL originale: \${ARGOCD_URL}"
-                        echo "[ARGOCD] Connexion à: \${ARGOCD_HOST}"
-                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
-                        yes | argocd login "\${ARGOCD_HOST}" \\
-                            --username admin \\
-                            --password "\${ARGOCD_PASS}" \\
-                            --plaintext \\
-                            --grpc-web \\
-                            --insecure || exit 1
-                        
-                        argocd app set ${ARGOCD_APP_NAME} \\
-                            --helm-set image.repository=${IMAGE_REPO} \\
-                            --helm-set image.tag=${env.PROJECT_VERSION} \\
-                            --sync || true
-                    """
-                }
-            }
-        }
+                        sh """
+                            argocd login ${host} \
+                                --username admin \
+                                --password '${ARGOCD_PASS}' \
+                                --plaintext --insecure
 
-        stage('⏳ ArgoCD Wait') {
-            when {
-                expression { 
-                    (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main') && 
-                    env.ARGOCD_ENABLED == "true" 
-                }
-            }
-            steps {
-                withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
-                    sh """
-                        # Retirer http:// ou https:// de l'URL si présent (ArgoCD CLI n'accepte pas avec --plaintext)
-                        ARGOCD_URL="${env.ARGOCD_SERVER}"
-                        # Retirer le préfixe http:// ou https:// avec sed (plus robuste)
-                        ARGOCD_HOST=\$(echo "\${ARGOCD_URL}" | sed -e 's|^https\\?://||' -e 's|^http://||')
-                        # Debug: afficher l'URL extraite
-                        echo "[ARGOCD] URL originale: \${ARGOCD_URL}"
-                        echo "[ARGOCD] Connexion à: \${ARGOCD_HOST}"
-                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
-                        yes | argocd login "\${ARGOCD_HOST}" \\
-                            --username admin \\
-                            --password "\${ARGOCD_PASS}" \\
-                            --plaintext \\
-                            --grpc-web \\
-                            --insecure || exit 1
-                        
-                        argocd app wait ${ARGOCD_APP_NAME} \\
-                            --timeout 300 \\
-                            --health || true
-                        
-                        argocd app get ${ARGOCD_APP_NAME}
-                    """
+                            argocd app sync ${ARGOCD_APP} --force || true
+                        """
+                    }
                 }
             }
         }
 
         stage('🧹 Cleanup') {
             steps {
-                sh '''
-                    echo "[CLEANUP] Suppression des images locales construites..."
-                    docker rmi ${IMAGE_NAME_BUILD} || true
-                    docker rmi ${IMAGE_NAME_SHA} || true
-                    docker rmi ${IMAGE_NAME_VERSION} || true
-
-                    # Pas de docker system prune ici: trop agressif sur un agent partagé.
-                '''
+                sh 'docker image prune -f || true'
             }
         }
     }
 
     post {
-        failure {
-            echo "[Pipeline] ❌ Build échoué — consulte les logs et rapports (JUnit, Sonar, Snyk, Trivy)."
-        }
         always {
-            archiveArtifacts artifacts: 'target/*.jar, target/surefire-reports/**, target/failsafe-reports/**, reports/**', allowEmptyArchive: true
+            archiveArtifacts(
+                artifacts: 'target/*.jar, reports/**',
+                allowEmptyArchive: true,
+                fingerprint: true
+            )
+            junit allowEmptyResults: true, testResults: '**/surefire-reports/*.xml, **/failsafe-reports/*.xml'
         }
+        success  { echo "✅ Pipeline completed successfully" }
+        failure  { echo "❌ Pipeline failed – check reports (Sonar, Snyk, Trivy)" }
+        aborted  { echo "⏹️ Pipeline aborted" }
     }
 }
 
+// ─── Helper Functions ────────────────────────────────────────────────────────
 
+def shouldBuildAndPush() {
+    return (BRANCH_NAME == null || BRANCH_NAME == 'main' || BRANCH_NAME.startsWith('release/') || BRANCH_NAME.startsWith('hotfix/'))
+}
