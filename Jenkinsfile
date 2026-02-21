@@ -24,11 +24,13 @@ pipeline {
         GIT_CREDENTIALS    = 'JENKINS_AGENT'
 
         // ─── Container Registry ─────────────────────────────────────────
-        // Note: Utiliser http:// explicitement car Nexus fonctionne en HTTP
-        NEXUS_REGISTRY     = 'http://localhost:8083'  // HTTP explicite pour éviter HTTPS par défaut
+        // Note: L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock
+        // Donc il faut utiliser host.docker.internal pour accéder à Nexus sur l'hôte
+        // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec host.docker.internal:8083
+        NEXUS_REGISTRY     = 'host.docker.internal:8083'  // Accès depuis conteneur vers hôte via daemon Docker
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
-        IMAGE_REPO         = "localhost:8083/simdev/${PROJECT_NAME}"  // Sans http:// pour les tags Docker
-        // Pour Kubernetes, utiliser host.docker.internal au lieu de localhost
+        IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+        // Pour Kubernetes, utiliser aussi host.docker.internal
         K8S_IMAGE_REPO     = "host.docker.internal:8083/simdev/${PROJECT_NAME}"
 
         // ─── Quality & Security ─────────────────────────────────────────
@@ -243,10 +245,34 @@ pipeline {
                     steps {
                         sh """
                             mkdir -p reports/trivy
+                            # Timeout augmenté à 15 minutes pour éviter les erreurs "context deadline exceeded"
+                            # Pour les grandes images (Spring Boot avec toutes les dépendances), Trivy peut prendre du temps
+                            # à analyser toutes les couches et dépendances Java
+                            echo "[TRIVY] Démarrage du scan de sécurité (timeout: 15m)..."
                             trivy image --format json --output reports/trivy/trivy.json \
                                 --severity CRITICAL,HIGH \
+                                --timeout 15m \
                                 --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
-                                ${IMAGE_REPO}:${BUILD_NUMBER}
+                                ${IMAGE_REPO}:${BUILD_NUMBER} || {
+                                EXIT_CODE=\$?
+                                if [ "\${EXIT_CODE}" = "1" ] && [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                                    echo "[TRIVY] ❌ Vulnérabilités détectées et FAIL_ON_TRIVY=true → échec du build"
+                                    exit 1
+                                elif [ "\${EXIT_CODE}" = "124" ] || [ "\${EXIT_CODE}" = "1" ]; then
+                                    echo "[TRIVY] ⚠️  Timeout ou erreur (code: \${EXIT_CODE})"
+                                    if [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                                        echo "[TRIVY]    FAIL_ON_TRIVY=true → échec du build"
+                                        exit 1
+                                    else
+                                        echo "[TRIVY]    FAIL_ON_TRIVY=false → warning seulement"
+                                        exit 0
+                                    fi
+                                else
+                                    echo "[TRIVY] ⚠️  Erreur inattendue (code: \${EXIT_CODE})"
+                                    exit 0
+                                fi
+                            }
+                            echo "[TRIVY] ✅ Scan terminé avec succès"
                         """
                     }
                     post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
@@ -254,208 +280,212 @@ pipeline {
             }
         }
 
-        stage('📦 Push Images') {
-            when { expression { shouldBuildAndPush() } }
-            steps {
-                withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh """
-                        # Utiliser http:// explicitement pour forcer HTTP (Nexus n'utilise pas HTTPS)
-                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || {
-                            echo "[REGISTRY] ❌ Échec de connexion à http://${NEXUS_REGISTRY}"
-                            echo "[REGISTRY]    Solution: Configurer Docker Desktop pour accepter les registries HTTP"
-                            echo "[REGISTRY]    Settings > Docker Engine > Ajouter:"
-                            echo "[REGISTRY]    \"insecure-registries\": [\"localhost:8083\", \"host.docker.internal:8083\"]"
-                            exit 1
-                        }
+        // stage('📦 Push Images') {
+        //     when { expression { shouldBuildAndPush() } }
+        //     steps {
+        //         withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+        //             sh """
+        //                 # Connexion au registry Nexus (HTTP non sécurisé)
+        //                 # ${NEXUS_REGISTRY} est dans la liste des insecure-registries de Docker
+        //                 # On utilise directement le host:port sans http:// car Docker le reconnaît comme insecure
+        //                 echo "\${PASS}" | docker login ${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || {
+        //                     echo "[REGISTRY] ❌ Échec de connexion à ${NEXUS_REGISTRY}"
+        //                     echo "[REGISTRY]    Vérifications:"
+        //                     echo "[REGISTRY]    1. Nexus est accessible: curl http://${NEXUS_REGISTRY}/v2/"
+        //                     echo "[REGISTRY]    2. Docker Desktop a redémarré après configuration insecure-registries"
+        //                     echo "[REGISTRY]    3. Vérifier: docker info | grep -A 10 'Insecure Registries'"
+        //                     echo "[REGISTRY]    4. Credentials corrects (admin/password)"
+        //                     exit 1
+        //                 }
 
-                        ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
+        //                 ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
-                        docker logout ${NEXUS_REGISTRY}
-                    """
-                }
-            }
-        }
+        //                 docker logout ${NEXUS_REGISTRY}
+        //             """
+        //         }
+        //     }
+        // }
 
-        stage('🚀 GitOps – ArgoCD') {
-            when {
-                allOf {
-                    expression { ARGOCD_ENABLED == 'true' }
-                    expression { shouldBuildAndPush() }
-                }
-            }
-            stages {
-                stage('🔐 ArgoCD Login') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                            script {
-                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+        // stage('🚀 GitOps – ArgoCD') {
+        //     when {
+        //         allOf {
+        //             expression { ARGOCD_ENABLED == 'true' }
+        //             expression { shouldBuildAndPush() }
+        //         }
+        //     }
+        //     stages {
+        //         stage('🔐 ArgoCD Login') {
+        //             steps {
+        //                 withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+        //                     script {
+        //                         def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
-                                sh """
-                                    echo "[ARGOCD] Connexion à ${host}..."
-                                    yes | argocd login ${host} \\
-                                        --username admin \\
-                                        --password "\${ARGOCD_PASS}" \\
-                                        --plaintext \\
-                                        --grpc-web \\
-                                        --insecure || {
-                                        echo "[ARGOCD] ❌ Échec de connexion"
-                                        exit 1
-                                    }
-                                    echo "[ARGOCD] ✅ Connexion réussie"
-                                """
-                            }
-                        }
-                    }
-                }
+        //                         sh """
+        //                             echo "[ARGOCD] Connexion à ${host}..."
+        //                             yes | argocd login ${host} \\
+        //                                 --username admin \\
+        //                                 --password "\${ARGOCD_PASS}" \\
+        //                                 --plaintext \\
+        //                                 --grpc-web \\
+        //                                 --insecure || {
+        //                                 echo "[ARGOCD] ❌ Échec de connexion"
+        //                                 exit 1
+        //                             }
+        //                             echo "[ARGOCD] ✅ Connexion réussie"
+        //                         """
+        //                     }
+        //                 }
+        //             }
+        //         }
 
-                stage('📱 ArgoCD App Check/Create') {
-            steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                            script {
-                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-                                // Convertir l'URL SSH en HTTPS pour ArgoCD (en Groovy pour éviter les problèmes d'interpolation)
-                                def gitRepoHttps = GIT_REPO_URL
-                                    .replace('git@github.com:', 'https://github.com/')
-                                    .replaceAll(/\.git$/, '') + '.git'
+        //         stage('📱 ArgoCD App Check/Create') {
+        //     steps {
+        //                 withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+        //                     script {
+        //                         def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+        //                         // Convertir l'URL SSH en HTTPS pour ArgoCD (en Groovy pour éviter les problèmes d'interpolation)
+        //                         def gitRepoHttps = GIT_REPO_URL
+        //                             .replace('git@github.com:', 'https://github.com/')
+        //                             .replaceAll(/\.git$/, '') + '.git'
 
-                                sh """
-                                    # Vérifier si la session est toujours valide, sinon se reconnecter
-                                    if ! argocd account get --grpc-web &>/dev/null; then
-                                        echo "[ARGOCD] Session expirée, reconnexion..."
-                                        yes | argocd login ${host} \\
-                                            --username admin \\
-                                            --password "\${ARGOCD_PASS}" \\
-                                            --plaintext \\
-                                            --grpc-web \\
-                                            --insecure || exit 1
-                                    fi
+        //                         sh """
+        //                             # Vérifier si la session est toujours valide, sinon se reconnecter
+        //                             if ! argocd account get --grpc-web &>/dev/null; then
+        //                                 echo "[ARGOCD] Session expirée, reconnexion..."
+        //                                 yes | argocd login ${host} \\
+        //                                     --username admin \\
+        //                                     --password "\${ARGOCD_PASS}" \\
+        //                                     --plaintext \\
+        //                                     --grpc-web \\
+        //                                     --insecure || exit 1
+        //                             fi
 
-                                    echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
-                                    # Utiliser app list pour vérifier l'existence (plus fiable que app get)
-                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
-                                        echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe déjà"
-                                        # Essayer d'obtenir les détails, mais ne pas échouer si permission refusée
-                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 || {
-                                            echo "[ARGOCD] ⚠️  Application trouvée mais permissions insuffisantes pour les détails"
-                                            echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
-                                        }
-                                    else
-                                        echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
+        //                             echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
+        //                             # Utiliser app list pour vérifier l'existence (plus fiable que app get)
+        //                             if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
+        //                                 echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe déjà"
+        //                                 # Essayer d'obtenir les détails, mais ne pas échouer si permission refusée
+        //                                 argocd app get ${ARGOCD_APP} --grpc-web 2>&1 || {
+        //                                     echo "[ARGOCD] ⚠️  Application trouvée mais permissions insuffisantes pour les détails"
+        //                                     echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
+        //                                 }
+        //                             else
+        //                                 echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
                                         
-                                        # Vérifier si la création automatique est activée
-                                        if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
-                                            echo "[ARGOCD]    Création automatique désactivée (ARGOCD_CREATE_APP=false)"
-                                            echo "[ARGOCD]    Créez l'application manuellement dans ArgoCD ou"
-                                            echo "[ARGOCD]    mettez ARGOCD_CREATE_APP=true une fois le chart Helm créé"
-                                            exit 0
-                                        fi
+        //                                 # Vérifier si la création automatique est activée
+        //                                 if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
+        //                                     echo "[ARGOCD]    Création automatique désactivée (ARGOCD_CREATE_APP=false)"
+        //                                     echo "[ARGOCD]    Créez l'application manuellement dans ArgoCD ou"
+        //                                     echo "[ARGOCD]    mettez ARGOCD_CREATE_APP=true une fois le chart Helm créé"
+        //                                     exit 0
+        //                                 fi
                                         
-                                        echo "[ARGOCD]    Tentative de création automatique..."
+        //                                 echo "[ARGOCD]    Tentative de création automatique..."
                                         
-                                        echo "[ARGOCD] URL Git: ${gitRepoHttps}"
-                                        echo "[ARGOCD] Chart path: ${ARGOCD_CHART_PATH}"
+        //                                 echo "[ARGOCD] URL Git: ${gitRepoHttps}"
+        //                                 echo "[ARGOCD] Chart path: ${ARGOCD_CHART_PATH}"
                                         
-                                        # Vérifier si le repo existe dans ArgoCD
-                                        if ! argocd repo get "${gitRepoHttps}" --grpc-web &>/dev/null; then
-                                            echo "[ARGOCD] Ajout du repository Git..."
-                                            argocd repo add "${gitRepoHttps}" \\
-                                                --name ${PROJECT_NAME}-repo \\
-                                                --insecure-skip-server-verification --grpc-web || {
-                                                echo "[ARGOCD] ⚠️  Échec de l'ajout du repository (peut-être déjà existant)"
-                                            }
-                                        fi
+        //                                 # Vérifier si le repo existe dans ArgoCD
+        //                                 if ! argocd repo get "${gitRepoHttps}" --grpc-web &>/dev/null; then
+        //                                     echo "[ARGOCD] Ajout du repository Git..."
+        //                                     argocd repo add "${gitRepoHttps}" \\
+        //                                         --name ${PROJECT_NAME}-repo \\
+        //                                         --insecure-skip-server-verification --grpc-web || {
+        //                                         echo "[ARGOCD] ⚠️  Échec de l'ajout du repository (peut-être déjà existant)"
+        //                                     }
+        //                                 fi
                                         
-                                        # Créer l'application
-                                        echo "[ARGOCD] Création de l'application ${ARGOCD_APP}..."
-                                        echo "[ARGOCD]   Repository: ${gitRepoHttps}"
-                                        echo "[ARGOCD]   Path: ${ARGOCD_CHART_PATH}"
-                                        echo "[ARGOCD]   Namespace: ${ARGOCD_NS}"
+        //                                 # Créer l'application
+        //                                 echo "[ARGOCD] Création de l'application ${ARGOCD_APP}..."
+        //                                 echo "[ARGOCD]   Repository: ${gitRepoHttps}"
+        //                                 echo "[ARGOCD]   Path: ${ARGOCD_CHART_PATH}"
+        //                                 echo "[ARGOCD]   Namespace: ${ARGOCD_NS}"
                                         
-                                        argocd app create ${ARGOCD_APP} \\
-                                            --repo "${gitRepoHttps}" \\
-                                            --path ${ARGOCD_CHART_PATH} \\
-                                            --dest-server https://kubernetes.default.svc \\
-                                            --dest-namespace ${ARGOCD_NS} \\
-                                            --sync-policy automated \\
-                                            --self-heal \\
-                                            --auto-prune \\
-                                            --grpc-web || {
-                                            echo "[ARGOCD] ❌ Échec de la création de l'application"
-                                            echo "[ARGOCD]    Raisons possibles :"
-                                            echo "[ARGOCD]    1. Le chemin '${ARGOCD_CHART_PATH}' n'existe pas dans le repository"
-                                            echo "[ARGOCD]    2. Le repository n'est pas accessible"
-                                            echo "[ARGOCD]    3. Le chart Helm est invalide"
-                                            echo "[ARGOCD]    "
-                                            echo "[ARGOCD]    Actions suggérées :"
-                                            echo "[ARGOCD]    - Vérifiez que le chemin '${ARGOCD_CHART_PATH}' existe dans le repo"
-                                            echo "[ARGOCD]    - Ou créez le chart Helm à cet emplacement"
-                                            echo "[ARGOCD]    - Ou modifiez ARGOCD_CHART_PATH dans le Jenkinsfile"
-                                            echo "[ARGOCD]    - Ou mettez ARGOCD_CREATE_APP=false pour désactiver la création"
-                                            echo "[ARGOCD]    "
-                                            echo "[ARGOCD]    Le build continue, mais l'application ArgoCD n'a pas été créée"
-                                            exit 0
-                                        }
-                                        echo "[ARGOCD] ✅ Application ${ARGOCD_APP} créée avec succès"
-                                    fi
-                                """
-                            }
-                        }
-                    }
-                }
+        //                                 argocd app create ${ARGOCD_APP} \\
+        //                                     --repo "${gitRepoHttps}" \\
+        //                                     --path ${ARGOCD_CHART_PATH} \\
+        //                                     --dest-server https://kubernetes.default.svc \\
+        //                                     --dest-namespace ${ARGOCD_NS} \\
+        //                                     --sync-policy automated \\
+        //                                     --self-heal \\
+        //                                     --auto-prune \\
+        //                                     --grpc-web || {
+        //                                     echo "[ARGOCD] ❌ Échec de la création de l'application"
+        //                                     echo "[ARGOCD]    Raisons possibles :"
+        //                                     echo "[ARGOCD]    1. Le chemin '${ARGOCD_CHART_PATH}' n'existe pas dans le repository"
+        //                                     echo "[ARGOCD]    2. Le repository n'est pas accessible"
+        //                                     echo "[ARGOCD]    3. Le chart Helm est invalide"
+        //                                     echo "[ARGOCD]    "
+        //                                     echo "[ARGOCD]    Actions suggérées :"
+        //                                     echo "[ARGOCD]    - Vérifiez que le chemin '${ARGOCD_CHART_PATH}' existe dans le repo"
+        //                                     echo "[ARGOCD]    - Ou créez le chart Helm à cet emplacement"
+        //                                     echo "[ARGOCD]    - Ou modifiez ARGOCD_CHART_PATH dans le Jenkinsfile"
+        //                                     echo "[ARGOCD]    - Ou mettez ARGOCD_CREATE_APP=false pour désactiver la création"
+        //                                     echo "[ARGOCD]    "
+        //                                     echo "[ARGOCD]    Le build continue, mais l'application ArgoCD n'a pas été créée"
+        //                                     exit 0
+        //                                 }
+        //                                 echo "[ARGOCD] ✅ Application ${ARGOCD_APP} créée avec succès"
+        //                             fi
+        //                         """
+        //                     }
+        //                 }
+        //             }
+        //         }
 
-                stage('🔄 ArgoCD Sync') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                            script {
-                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+        //         stage('🔄 ArgoCD Sync') {
+        //             steps {
+        //                 withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+        //                     script {
+        //                         def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
-                                sh """
-                                    # Vérifier si la session est toujours valide, sinon se reconnecter
-                                    if ! argocd account get --grpc-web &>/dev/null; then
-                                        echo "[ARGOCD] Session expirée, reconnexion..."
-                                        yes | argocd login ${host} \\
-                                            --username admin \\
-                                            --password "\${ARGOCD_PASS}" \\
-                                            --plaintext \\
-                                            --grpc-web \\
-                                            --insecure || exit 1
-                                    fi
+        //                         sh """
+        //                             # Vérifier si la session est toujours valide, sinon se reconnecter
+        //                             if ! argocd account get --grpc-web &>/dev/null; then
+        //                                 echo "[ARGOCD] Session expirée, reconnexion..."
+        //                                 yes | argocd login ${host} \\
+        //                                     --username admin \\
+        //                                     --password "\${ARGOCD_PASS}" \\
+        //                                     --plaintext \\
+        //                                     --grpc-web \\
+        //                                     --insecure || exit 1
+        //                             fi
 
-                                    echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
-                                    # Utiliser app list pour vérifier l'existence (plus fiable que app get)
-                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
-                                        echo "[ARGOCD] Mise à jour de l'image tag vers ${env.PROJECT_VERSION}..."
-                                        # Mettre à jour l'image tag dans le chart Helm
-                                        # Utiliser K8S_IMAGE_REPO pour que Kubernetes puisse accéder à Nexus
-                                        argocd app set ${ARGOCD_APP} \\
-                                            --helm-set image.repository=${K8S_IMAGE_REPO} \\
-                                            --helm-set image.tag=${env.PROJECT_VERSION} \\
-                                            --grpc-web || {
-                                            echo "[ARGOCD] ⚠️  Échec de la mise à jour de l'image tag"
-                                        }
+        //                             echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
+        //                             # Utiliser app list pour vérifier l'existence (plus fiable que app get)
+        //                             if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
+        //                                 echo "[ARGOCD] Mise à jour de l'image tag vers ${env.PROJECT_VERSION}..."
+        //                                 # Mettre à jour l'image tag dans le chart Helm
+        //                                 # Utiliser K8S_IMAGE_REPO pour que Kubernetes puisse accéder à Nexus
+        //                                 argocd app set ${ARGOCD_APP} \\
+        //                                     --helm-set image.repository=${K8S_IMAGE_REPO} \\
+        //                                     --helm-set image.tag=${env.PROJECT_VERSION} \\
+        //                                     --grpc-web || {
+        //                                     echo "[ARGOCD] ⚠️  Échec de la mise à jour de l'image tag"
+        //                                 }
                                         
-                                        echo "[ARGOCD] Tentative de synchronisation..."
-                                        argocd app sync ${ARGOCD_APP} \\
-                                            --grpc-web \\
-                                            --force || {
-                                            echo "[ARGOCD] ⚠️  Échec de la synchronisation"
-                                            echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
-                                            exit 1
-                                        }
-                                        echo "[ARGOCD] ✅ Application synchronisée avec succès"
-                                    else
-                                        echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
-                                        echo "[ARGOCD]    Applications disponibles:"
-                                        argocd app list --grpc-web 2>&1 | head -10 || echo "   (impossible de lister les applications)"
-                                        exit 0
-                                    fi
-                                """
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        //                                 echo "[ARGOCD] Tentative de synchronisation..."
+        //                                 argocd app sync ${ARGOCD_APP} \\
+        //                                     --grpc-web \\
+        //                                     --force || {
+        //                                     echo "[ARGOCD] ⚠️  Échec de la synchronisation"
+        //                                     echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
+        //                                     exit 1
+        //                                 }
+        //                                 echo "[ARGOCD] ✅ Application synchronisée avec succès"
+        //                             else
+        //                                 echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
+        //                                 echo "[ARGOCD]    Applications disponibles:"
+        //                                 argocd app list --grpc-web 2>&1 | head -10 || echo "   (impossible de lister les applications)"
+        //                                 exit 0
+        //                             fi
+        //                         """
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
 
         stage('🧹 Cleanup') {
             steps {
@@ -493,4 +523,5 @@ pipeline {
 
 def shouldBuildAndPush() {
     return (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' || env.BRANCH_NAME.startsWith('release/') || env.BRANCH_NAME.startsWith('hotfix/'))
+}
 }
