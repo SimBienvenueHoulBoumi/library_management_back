@@ -4,7 +4,7 @@
 replicaCount: 1
 
 image:
-  repository: localhost:8083/simdev/library-management
+  repository: host.docker.internal:8083/simdev/library-management
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   # Le tag sera mis à jour automatiquement par ArgoCD via le pipeline Jenkins

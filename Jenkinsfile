@@ -27,6 +27,8 @@ pipeline {
         NEXUS_REGISTRY     = 'localhost:8083'  // ← À sécuriser / passer en HTTPS si possible
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
         IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+        // Pour Kubernetes, utiliser host.docker.internal au lieu de localhost
+        K8S_IMAGE_REPO     = "host.docker.internal:8083/simdev/${PROJECT_NAME}"
 
         // ─── Quality & Security ─────────────────────────────────────────
         SONAR_URL          = 'http://sonarqube:9000'
@@ -404,8 +406,9 @@ pipeline {
                                     if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
                                         echo "[ARGOCD] Mise à jour de l'image tag vers ${env.PROJECT_VERSION}..."
                                         # Mettre à jour l'image tag dans le chart Helm
+                                        # Utiliser K8S_IMAGE_REPO pour que Kubernetes puisse accéder à Nexus
                                         argocd app set ${ARGOCD_APP} \\
-                                            --helm-set image.repository=${IMAGE_REPO} \\
+                                            --helm-set image.repository=${K8S_IMAGE_REPO} \\
                                             --helm-set image.tag=${env.PROJECT_VERSION} \\
                                             --grpc-web || {
                                             echo "[ARGOCD] ⚠️  Échec de la mise à jour de l'image tag"
