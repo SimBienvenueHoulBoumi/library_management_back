@@ -563,10 +563,11 @@ pipeline {
                             --insecure || exit 1
                         
                         # Convertir l'URL SSH en HTTPS pour ArgoCD (plus simple, pas besoin de SSH_AUTH_SOCK)
-                        GIT_REPO_HTTPS=\$(echo "${GIT_REPO_URL}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
+                        GIT_REPO_SSH="${GIT_REPO_URL}"
+                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
                         GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
                         
-                        echo "[ARGOCD] URL SSH: ${GIT_REPO_URL}"
+                        echo "[ARGOCD] URL SSH: \${GIT_REPO_SSH}"
                         echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
                         
                         # Vérifier si le repo existe déjà (en utilisant l'URL HTTPS)
@@ -614,10 +615,11 @@ pipeline {
                             --insecure || exit 1
                         
                         # Convertir l'URL SSH en HTTPS pour ArgoCD
-                        GIT_REPO_HTTPS=\$(echo "${GIT_REPO_URL}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
+                        GIT_REPO_SSH="${GIT_REPO_URL}"
+                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
                         GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
                         
-                        echo "[ARGOCD] URL SSH: ${GIT_REPO_URL}"
+                        echo "[ARGOCD] URL SSH: \${GIT_REPO_SSH}"
                         echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
                         
                         if ! argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
