@@ -16,7 +16,7 @@ pipeline {
     environment {
         // ─── Application ────────────────────────────────────────────────
         APP_NAME           = 'library-management'
-        PROJECT_NAME       = 'test-app'
+        PROJECT_NAME       = 'library-management'
         PROJECT_VERSION    = ''
 
         // ─── SCM ────────────────────────────────────────────────────────
@@ -46,7 +46,9 @@ pipeline {
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
-        ARGOCD_CHART_PATH  = "kubernetes/charts/${PROJECT_NAME}"
+        ARGOCD_CHART_PATH  = "kubernetes/charts/library-management"
+        // Si ARGOCD_CREATE_APP=false, la création automatique est désactivée
+        ARGOCD_CREATE_APP  = 'true'  // Activé maintenant que le chart Helm est créé
     }
 
     stages {
@@ -317,7 +319,16 @@ pipeline {
                                         }
                                     else
                                         echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
-                                        echo "[ARGOCD]    Tentative de création..."
+                                        
+                                        # Vérifier si la création automatique est activée
+                                        if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
+                                            echo "[ARGOCD]    Création automatique désactivée (ARGOCD_CREATE_APP=false)"
+                                            echo "[ARGOCD]    Créez l'application manuellement dans ArgoCD ou"
+                                            echo "[ARGOCD]    mettez ARGOCD_CREATE_APP=true une fois le chart Helm créé"
+                                            exit 0
+                                        fi
+                                        
+                                        echo "[ARGOCD]    Tentative de création automatique..."
                                         
                                         echo "[ARGOCD] URL Git: ${gitRepoHttps}"
                                         echo "[ARGOCD] Chart path: ${ARGOCD_CHART_PATH}"
@@ -357,6 +368,7 @@ pipeline {
                                             echo "[ARGOCD]    - Vérifiez que le chemin '${ARGOCD_CHART_PATH}' existe dans le repo"
                                             echo "[ARGOCD]    - Ou créez le chart Helm à cet emplacement"
                                             echo "[ARGOCD]    - Ou modifiez ARGOCD_CHART_PATH dans le Jenkinsfile"
+                                            echo "[ARGOCD]    - Ou mettez ARGOCD_CREATE_APP=false pour désactiver la création"
                                             echo "[ARGOCD]    "
                                             echo "[ARGOCD]    Le build continue, mais l'application ArgoCD n'a pas été créée"
                                             exit 0
@@ -390,6 +402,15 @@ pipeline {
                                     echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
                                     # Utiliser app list pour vérifier l'existence (plus fiable que app get)
                                     if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
+                                        echo "[ARGOCD] Mise à jour de l'image tag vers ${env.PROJECT_VERSION}..."
+                                        # Mettre à jour l'image tag dans le chart Helm
+                                        argocd app set ${ARGOCD_APP} \\
+                                            --helm-set image.repository=${IMAGE_REPO} \\
+                                            --helm-set image.tag=${env.PROJECT_VERSION} \\
+                                            --grpc-web || {
+                                            echo "[ARGOCD] ⚠️  Échec de la mise à jour de l'image tag"
+                                        }
+                                        
                                         echo "[ARGOCD] Tentative de synchronisation..."
                                         argocd app sync ${ARGOCD_APP} \\
                                             --grpc-web \\
