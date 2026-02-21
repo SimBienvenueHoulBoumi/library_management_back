@@ -122,12 +122,16 @@ pipeline {
                         PROJECT_VERSION
                     ]
 
-                    env.FULL_IMAGES = env.IMAGE_TAGS.collect { tag ->
+                    def fullImages = env.IMAGE_TAGS.collect { tag ->
                         "${IMAGE_REPO}:${tag}"
                     }
+                    
+                    // Stocker les images dans env pour les utiliser dans d'autres stages
+                    env.FULL_IMAGES = fullImages.join(',')
 
+                    def tags = fullImages.join(' -t ')
                     sh """
-                        docker build -t ${FULL_IMAGES.join(' -t ')} .
+                        docker build -t ${tags} .
                     """
                 }
             }
@@ -176,7 +180,7 @@ pipeline {
                             exit 1
                         }
 
-                        ${FULL_IMAGES.collect { "docker push ${it}" }.join('\n')}
+                        ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
                         docker logout ${NEXUS_REGISTRY}
                     """
