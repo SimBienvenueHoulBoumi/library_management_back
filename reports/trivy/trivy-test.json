@@ -1,0 +1,535 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-02-21T23:23:49.489364+01:00",
+  "ArtifactName": "nginx:latest",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 164459520,
+    "OS": {
+      "Family": "debian",
+      "Name": "13.3"
+    },
+    "ImageID": "sha256:5cdef4ac3335f68428701c14c5f12992f5e3669ce8ab7309257d263eb7a856b1",
+    "DiffIDs": [
+      "sha256:a8ff6f8cbdfd6741c10dd183560df7212db666db046768b0f05bbc3904515f03",
+      "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5",
+      "sha256:18b09c39ca9f595897956456d144ca812ba219cfe72cee888945b7050fc53b38",
+      "sha256:bced0e9a39b0302b03e79b279a5de8394544197578327bfe3108a989b4a7154e",
+      "sha256:b9390f60b84fa6b5e7772d3c32dd1e141eb12f34e4cd98dd03da87e7552d76fe",
+      "sha256:627c009aa11539cb60bc61ce3709ab81059b224674abd8e06f27b26798969155",
+      "sha256:4952de04fe7e4a2b63ed8ac879f7bb23cefa98d6005677c59ebd01fe27d02ba2"
+    ],
+    "RepoTags": [
+      "nginx:latest"
+    ],
+    "RepoDigests": [
+      "nginx@sha256:341bf0f3ce6c5277d6002cf6e1fb0319fa4252add24ab6a0e262e0056d313208"
+    ],
+    "ImageConfig": {
+      "architecture": "amd64",
+      "created": "2026-02-04T23:53:09.258787756Z",
+      "history": [
+        {
+          "created": "2026-02-02T00:00:00Z",
+          "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1769990400'",
+          "comment": "debuerreotype 0.17"
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "LABEL maintainer=NGINX Docker Maintainers \u003cdocker-maint@nginx.com\u003e",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV NGINX_VERSION=1.29.5",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV NJS_VERSION=0.9.5",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV NJS_RELEASE=1~trixie",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV ACME_VERSION=0.3.1",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV PKG_RELEASE=1~trixie",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "ENV DYNPKG_RELEASE=1~trixie",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.089546035Z",
+          "created_by": "RUN /bin/sh -c set -x     \u0026\u0026 groupadd --system --gid 101 nginx     \u0026\u0026 useradd --system --gid nginx --no-create-home --home /nonexistent --comment \"nginx user\" --shell /bin/false --uid 101 nginx     \u0026\u0026 apt-get update     \u0026\u0026 apt-get install --no-install-recommends --no-install-suggests -y gnupg1 ca-certificates     \u0026\u0026     NGINX_GPGKEYS=\"573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3\";     NGINX_GPGKEY_PATH=/etc/apt/keyrings/nginx-archive-keyring.gpg;     export GNUPGHOME=\"$(mktemp -d)\";     found='';     for NGINX_GPGKEY in $NGINX_GPGKEYS; do     for server in         hkp://keyserver.ubuntu.com:80         pgp.mit.edu     ; do         echo \"Fetching GPG key $NGINX_GPGKEY from $server\";         gpg1 --batch --keyserver \"$server\" --keyserver-options timeout=10 --recv-keys \"$NGINX_GPGKEY\" \u0026\u0026 found=yes \u0026\u0026 break;     done;     test -z \"$found\" \u0026\u0026 echo \u003e\u00262 \"error: failed to fetch GPG key $NGINX_GPGKEY\" \u0026\u0026 exit 1;     done;     gpg1 --batch --export $NGINX_GPGKEYS \u003e \"$NGINX_GPGKEY_PATH\" ;     rm -rf \"$GNUPGHOME\";     apt-get remove --purge --auto-remove -y gnupg1 \u0026\u0026 rm -rf /var/lib/apt/lists/*     \u0026\u0026 dpkgArch=\"$(dpkg --print-architecture)\"     \u0026\u0026 nginxPackages=\"         nginx=${NGINX_VERSION}-${PKG_RELEASE}         nginx-module-xslt=${NGINX_VERSION}-${DYNPKG_RELEASE}         nginx-module-geoip=${NGINX_VERSION}-${DYNPKG_RELEASE}         nginx-module-image-filter=${NGINX_VERSION}-${DYNPKG_RELEASE}         nginx-module-njs=${NGINX_VERSION}+${NJS_VERSION}-${NJS_RELEASE}         nginx-module-acme=${NGINX_VERSION}+${ACME_VERSION}-${PKG_RELEASE}     \"     \u0026\u0026 case \"$dpkgArch\" in         amd64|arm64)             echo \"deb [signed-by=$NGINX_GPGKEY_PATH] https://nginx.org/packages/mainline/debian/ trixie nginx\" \u003e\u003e /etc/apt/sources.list.d/nginx.list             \u0026\u0026 apt-get update             ;;         *)             tempDir=\"$(mktemp -d)\"             \u0026\u0026 chmod 777 \"$tempDir\"                         \u0026\u0026 savedAptMark=\"$(apt-mark showmanual)\"                         \u0026\u0026 apt-get update             \u0026\u0026 apt-get install --no-install-recommends --no-install-suggests -y                 cargo                 curl                 devscripts                 equivs                 git                 libxml2-utils                 lsb-release                 xsltproc             \u0026\u0026 (                 cd \"$tempDir\"                 \u0026\u0026 export CARGO_HOME=\"$tempDir/.cargo\"                 \u0026\u0026 REVISION=\"${NGINX_VERSION}-${PKG_RELEASE}\"                 \u0026\u0026 REVISION=${REVISION%~*}                 \u0026\u0026 curl -f -L -O https://github.com/nginx/pkg-oss/archive/${REVISION}.tar.gz                 \u0026\u0026 PKGOSSCHECKSUM=\"b8584eaa97130ba7743dfbb2a10f665d64cb54b864e2038d0fd298d24682fc05eb4472738430b15862dabc6f374917f1b9889117051a852d36d0a6c8bc898921 *${REVISION}.tar.gz\"                 \u0026\u0026 if [ \"$(openssl sha512 -r ${REVISION}.tar.gz)\" = \"$PKGOSSCHECKSUM\" ]; then                     echo \"pkg-oss tarball checksum verification succeeded!\";                 else                     echo \"pkg-oss tarball checksum verification failed!\";                     exit 1;                 fi                 \u0026\u0026 tar xzvf ${REVISION}.tar.gz                 \u0026\u0026 cd pkg-oss-${REVISION}                 \u0026\u0026 cd debian                 \u0026\u0026 for target in base module-geoip module-image-filter module-njs module-xslt module-acme; do                     make rules-$target;                     mk-build-deps --install --tool=\"apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends --yes\"                         debuild-$target/nginx-$NGINX_VERSION/debian/control;                 done                 \u0026\u0026 make base module-geoip module-image-filter module-njs module-xslt module-acme             )                         \u0026\u0026 apt-mark showmanual | xargs apt-mark auto \u003e /dev/null             \u0026\u0026 { [ -z \"$savedAptMark\" ] || apt-mark manual $savedAptMark; }                         \u0026\u0026 ls -lAFh \"$tempDir\"             \u0026\u0026 ( cd \"$tempDir\" \u0026\u0026 dpkg-scanpackages . \u003e Packages )             \u0026\u0026 grep '^Package: ' \"$tempDir/Packages\"             \u0026\u0026 echo \"deb [ trusted=yes ] file://$tempDir ./\" \u003e /etc/apt/sources.list.d/temp.list             \u0026\u0026 apt-get -o Acquire::GzipIndexes=false update             ;;     esac         \u0026\u0026 apt-get install --no-install-recommends --no-install-suggests -y                         $nginxPackages                         gettext-base                         curl     \u0026\u0026 apt-get remove --purge --auto-remove -y \u0026\u0026 rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/nginx.list         \u0026\u0026 if [ -n \"$tempDir\" ]; then         apt-get purge -y --auto-remove         \u0026\u0026 rm -rf \"$tempDir\" /etc/apt/sources.list.d/temp.list;     fi     \u0026\u0026 ln -sf /dev/stdout /var/log/nginx/access.log     \u0026\u0026 ln -sf /dev/stderr /var/log/nginx/error.log     \u0026\u0026 mkdir /docker-entrypoint.d # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.116243246Z",
+          "created_by": "COPY docker-entrypoint.sh / # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.132074668Z",
+          "created_by": "COPY 10-listen-on-ipv6-by-default.sh /docker-entrypoint.d # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.156017855Z",
+          "created_by": "COPY 15-local-resolvers.envsh /docker-entrypoint.d # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.208527763Z",
+          "created_by": "COPY 20-envsubst-on-templates.sh /docker-entrypoint.d # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.258787756Z",
+          "created_by": "COPY 30-tune-worker-processes.sh /docker-entrypoint.d # buildkit",
+          "comment": "buildkit.dockerfile.v0"
+        },
+        {
+          "created": "2026-02-04T23:53:09.258787756Z",
+          "created_by": "ENTRYPOINT [\"/docker-entrypoint.sh\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.258787756Z",
+          "created_by": "EXPOSE map[80/tcp:{}]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.258787756Z",
+          "created_by": "STOPSIGNAL SIGQUIT",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-02-04T23:53:09.258787756Z",
+          "created_by": "CMD [\"nginx\" \"-g\" \"daemon off;\"]",
+          "comment": "buildkit.dockerfile.v0",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+          "sha256:a8ff6f8cbdfd6741c10dd183560df7212db666db046768b0f05bbc3904515f03",
+          "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5",
+          "sha256:18b09c39ca9f595897956456d144ca812ba219cfe72cee888945b7050fc53b38",
+          "sha256:bced0e9a39b0302b03e79b279a5de8394544197578327bfe3108a989b4a7154e",
+          "sha256:b9390f60b84fa6b5e7772d3c32dd1e141eb12f34e4cd98dd03da87e7552d76fe",
+          "sha256:627c009aa11539cb60bc61ce3709ab81059b224674abd8e06f27b26798969155",
+          "sha256:4952de04fe7e4a2b63ed8ac879f7bb23cefa98d6005677c59ebd01fe27d02ba2"
+        ]
+      },
+      "config": {
+        "Cmd": [
+          "nginx",
+          "-g",
+          "daemon off;"
+        ],
+        "Entrypoint": [
+          "/docker-entrypoint.sh"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "NGINX_VERSION=1.29.5",
+          "NJS_VERSION=0.9.5",
+          "NJS_RELEASE=1~trixie",
+          "ACME_VERSION=0.3.1",
+          "PKG_RELEASE=1~trixie",
+          "DYNPKG_RELEASE=1~trixie"
+        ],
+        "Labels": {
+          "maintainer": "NGINX Docker Maintainers \u003cdocker-maint@nginx.com\u003e"
+        },
+        "ExposedPorts": {
+          "80/tcp": {}
+        },
+        "StopSignal": "SIGQUIT"
+      }
+    },
+    "Layers": [
+      {
+        "Size": 81039360,
+        "Digest": "sha256:0c8d55a45c0dc58de60579b9cc5b708de9e7957f4591fc7de941b67c7e245da0",
+        "DiffID": "sha256:a8ff6f8cbdfd6741c10dd183560df7212db666db046768b0f05bbc3904515f03"
+      },
+      {
+        "Size": 83397120,
+        "Digest": "sha256:46bf3a120c8ebc0c207a3a819bb44ad7e6bbcd0b27c2c8e7430b8baea6c321d2",
+        "DiffID": "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5"
+      },
+      {
+        "Size": 3584,
+        "Digest": "sha256:4f4efe02d542e6a146723a61b42b2e063b2f89f58430dd4d9a8aad7ac26c905c",
+        "DiffID": "sha256:18b09c39ca9f595897956456d144ca812ba219cfe72cee888945b7050fc53b38"
+      },
+      {
+        "Size": 4608,
+        "Digest": "sha256:7b6cb8ccac7b09e037d667024c9afc9c0429738a2b7b24c2d41f5bce008c139c",
+        "DiffID": "sha256:bced0e9a39b0302b03e79b279a5de8394544197578327bfe3108a989b4a7154e"
+      },
+      {
+        "Size": 2560,
+        "Digest": "sha256:f73400a233fdfe4b0e1ebf8a8035349bf8b8cfdc85da665c97b4099d1e8ae7df",
+        "DiffID": "sha256:b9390f60b84fa6b5e7772d3c32dd1e141eb12f34e4cd98dd03da87e7552d76fe"
+      },
+      {
+        "Size": 5120,
+        "Digest": "sha256:47cd406a84ef91b76fa7a653ed5e89663af9f8c2644a0ed0387fa0b1395e5114",
+        "DiffID": "sha256:627c009aa11539cb60bc61ce3709ab81059b224674abd8e06f27b26798969155"
+      },
+      {
+        "Size": 7168,
+        "Digest": "sha256:bae5a1799a803b0a3df8179c56dd95fdb6f88c7aa10600d101196c723994f679",
+        "DiffID": "sha256:4952de04fe7e4a2b63ed8ac879f7bb23cefa98d6005677c59ebd01fe27d02ba2"
+      }
+    ]
+  },
+  "Results": [
+    {
+      "Target": "nginx:latest (debian 13.3)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-0861",
+          "PkgID": "libc-bin@2.41-12+deb13u1",
+          "PkgName": "libc-bin",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/debian/libc-bin@2.41-12%2Bdeb13u1?arch=amd64\u0026distro=debian-13.3",
+            "UID": "7a2855ad102371a8"
+          },
+          "InstalledVersion": "2.41-12+deb13u1",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:0c8d55a45c0dc58de60579b9cc5b708de9e7957f4591fc7de941b67c7e245da0",
+            "DiffID": "sha256:a8ff6f8cbdfd6741c10dd183560df7212db666db046768b0f05bbc3904515f03"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-0861",
+          "DataSource": {
+            "ID": "debian",
+            "Name": "Debian Security Tracker",
+            "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+          },
+          "Title": "glibc: Integer overflow in memalign leads to heap corruption",
+          "Description": "Passing too large an alignment to the memalign suite of functions (memalign, posix_memalign, aligned_alloc) in the GNU C Library version 2.30 to 2.42 may result in an integer overflow, which could consequently result in a heap corruption.\n\nNote that the attacker must have control over both, the size as well as the alignment arguments of the memalign function to be able to exploit this.  The size parameter must be close enough to PTRDIFF_MAX so as to overflow size_t along with the large alignment argument.  This limits the malicious inputs for the alignment for memalign to the range [1\u003c\u003c62+ 1, 1\u003c\u003c63] and exactly 1\u003c\u003c63 for posix_memalign and aligned_alloc.\n\nTypically the alignment argument passed to such functions is a known constrained quantity (e.g. page size, block size, struct sizes) and is not attacker controlled, because of which this may not be easily exploitable in practice.  An application bug could potentially result in the input alignment being too large, e.g. due to a different buffer overflow or integer overflow in the application or its dependent libraries, but that is again an uncommon usage pattern given typical sources of alignments.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-190"
+          ],
+          "VendorSeverity": {
+            "alma": 2,
+            "azure": 2,
+            "cbl-mariner": 2,
+            "oracle-oval": 2,
+            "photon": 3,
+            "redhat": 1,
+            "rocky": 2,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 8.1
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2026/01/16/5",
+            "https://access.redhat.com/errata/RHSA-2026:1334",
+            "https://access.redhat.com/security/cve/CVE-2026-0861",
+            "https://bugzilla.redhat.com/2429771",
+            "https://bugzilla.redhat.com/2430201",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2429771",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2430201",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-0861",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-0915",
+            "https://errata.almalinux.org/10/ALSA-2026-1334.html",
+            "https://errata.rockylinux.org/RLSA-2026:1334",
+            "https://linux.oracle.com/cve/CVE-2026-0861.html",
+            "https://linux.oracle.com/errata/ELSA-2026-50120.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-0861",
+            "https://sourceware.org/bugzilla/show_bug.cgi?id=33796",
+            "https://sourceware.org/git/?p=glibc.git;a=blob_plain;f=advisories/GLIBC-SA-2026-0001",
+            "https://ubuntu.com/security/notices/USN-8005-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-0861"
+          ],
+          "PublishedDate": "2026-01-14T21:15:52.617Z",
+          "LastModifiedDate": "2026-02-03T18:26:25.39Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-0861",
+          "PkgID": "libc6@2.41-12+deb13u1",
+          "PkgName": "libc6",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/debian/libc6@2.41-12%2Bdeb13u1?arch=amd64\u0026distro=debian-13.3",
+            "UID": "7bdabb7e1bdbcd9b"
+          },
+          "InstalledVersion": "2.41-12+deb13u1",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:0c8d55a45c0dc58de60579b9cc5b708de9e7957f4591fc7de941b67c7e245da0",
+            "DiffID": "sha256:a8ff6f8cbdfd6741c10dd183560df7212db666db046768b0f05bbc3904515f03"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-0861",
+          "DataSource": {
+            "ID": "debian",
+            "Name": "Debian Security Tracker",
+            "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+          },
+          "Title": "glibc: Integer overflow in memalign leads to heap corruption",
+          "Description": "Passing too large an alignment to the memalign suite of functions (memalign, posix_memalign, aligned_alloc) in the GNU C Library version 2.30 to 2.42 may result in an integer overflow, which could consequently result in a heap corruption.\n\nNote that the attacker must have control over both, the size as well as the alignment arguments of the memalign function to be able to exploit this.  The size parameter must be close enough to PTRDIFF_MAX so as to overflow size_t along with the large alignment argument.  This limits the malicious inputs for the alignment for memalign to the range [1\u003c\u003c62+ 1, 1\u003c\u003c63] and exactly 1\u003c\u003c63 for posix_memalign and aligned_alloc.\n\nTypically the alignment argument passed to such functions is a known constrained quantity (e.g. page size, block size, struct sizes) and is not attacker controlled, because of which this may not be easily exploitable in practice.  An application bug could potentially result in the input alignment being too large, e.g. due to a different buffer overflow or integer overflow in the application or its dependent libraries, but that is again an uncommon usage pattern given typical sources of alignments.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-190"
+          ],
+          "VendorSeverity": {
+            "alma": 2,
+            "azure": 2,
+            "cbl-mariner": 2,
+            "oracle-oval": 2,
+            "photon": 3,
+            "redhat": 1,
+            "rocky": 2,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 8.1
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2026/01/16/5",
+            "https://access.redhat.com/errata/RHSA-2026:1334",
+            "https://access.redhat.com/security/cve/CVE-2026-0861",
+            "https://bugzilla.redhat.com/2429771",
+            "https://bugzilla.redhat.com/2430201",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2429771",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2430201",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-0861",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-0915",
+            "https://errata.almalinux.org/10/ALSA-2026-1334.html",
+            "https://errata.rockylinux.org/RLSA-2026:1334",
+            "https://linux.oracle.com/cve/CVE-2026-0861.html",
+            "https://linux.oracle.com/errata/ELSA-2026-50120.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-0861",
+            "https://sourceware.org/bugzilla/show_bug.cgi?id=33796",
+            "https://sourceware.org/git/?p=glibc.git;a=blob_plain;f=advisories/GLIBC-SA-2026-0001",
+            "https://ubuntu.com/security/notices/USN-8005-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-0861"
+          ],
+          "PublishedDate": "2026-01-14T21:15:52.617Z",
+          "LastModifiedDate": "2026-02-03T18:26:25.39Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-22695",
+          "PkgID": "libpng16-16t64@1.6.48-1+deb13u1",
+          "PkgName": "libpng16-16t64",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/debian/libpng16-16t64@1.6.48-1%2Bdeb13u1?arch=amd64\u0026distro=debian-13.3",
+            "UID": "2538a2da1c3aa646"
+          },
+          "InstalledVersion": "1.6.48-1+deb13u1",
+          "FixedVersion": "1.6.48-1+deb13u2",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:46bf3a120c8ebc0c207a3a819bb44ad7e6bbcd0b27c2c8e7430b8baea6c321d2",
+            "DiffID": "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5"
+          },
+          "SeveritySource": "nvd",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-22695",
+          "DataSource": {
+            "ID": "debian",
+            "Name": "Debian Security Tracker",
+            "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+          },
+          "Title": "libpng: libpng: Denial of service and information disclosure via heap buffer over-read in png_image_finish_read",
+          "Description": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From 1.6.51 to 1.6.53, there is a heap buffer over-read in the libpng simplified API function png_image_finish_read when processing interlaced 16-bit PNGs with 8-bit output format and non-minimal row stride. This is a regression introduced by the fix for CVE-2025-65018. This vulnerability is fixed in 1.6.54.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-125"
+          ],
+          "VendorSeverity": {
+            "amazon": 2,
+            "azure": 2,
+            "cbl-mariner": 2,
+            "nvd": 3,
+            "photon": 3,
+            "redhat": 2,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:H",
+              "V3Score": 7.1
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:H",
+              "V3Score": 6.1
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2026-22695",
+            "https://github.com/pnggroup/libpng/commit/218612ddd6b17944e21eda56caf8b4bf7779d1ea",
+            "https://github.com/pnggroup/libpng/commit/e4f7ad4ea2",
+            "https://github.com/pnggroup/libpng/issues/778",
+            "https://github.com/pnggroup/libpng/security/advisories/GHSA-mmq5-27w3-rxpp",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-22695",
+            "https://ubuntu.com/security/notices/USN-7963-1",
+            "https://ubuntu.com/security/notices/USN-8035-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-22695",
+            "https://www.openwall.com/lists/oss-security/2026/01/12/7"
+          ],
+          "PublishedDate": "2026-01-12T23:15:52.597Z",
+          "LastModifiedDate": "2026-01-21T18:58:55.787Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-22801",
+          "PkgID": "libpng16-16t64@1.6.48-1+deb13u1",
+          "PkgName": "libpng16-16t64",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/debian/libpng16-16t64@1.6.48-1%2Bdeb13u1?arch=amd64\u0026distro=debian-13.3",
+            "UID": "2538a2da1c3aa646"
+          },
+          "InstalledVersion": "1.6.48-1+deb13u1",
+          "FixedVersion": "1.6.48-1+deb13u2",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:46bf3a120c8ebc0c207a3a819bb44ad7e6bbcd0b27c2c8e7430b8baea6c321d2",
+            "DiffID": "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5"
+          },
+          "SeveritySource": "nvd",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-22801",
+          "DataSource": {
+            "ID": "debian",
+            "Name": "Debian Security Tracker",
+            "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+          },
+          "Title": "libpng: libpng: Information disclosure and denial of service via integer truncation in simplified write API",
+          "Description": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From 1.6.26 to 1.6.53, there is an integer truncation in the libpng simplified write API functions png_write_image_16bit and png_write_image_8bit causes heap buffer over-read when the caller provides a negative row stride (for bottom-up image layouts) or a stride exceeding 65535 bytes. The bug was introduced in libpng 1.6.26 (October 2016) by casts added to silence compiler warnings on 16-bit systems. This vulnerability is fixed in 1.6.54.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-125",
+            "CWE-190"
+          ],
+          "VendorSeverity": {
+            "amazon": 2,
+            "azure": 2,
+            "cbl-mariner": 2,
+            "nvd": 3,
+            "photon": 3,
+            "redhat": 2,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 7.8
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:H",
+              "V3Score": 6.6
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2026-22801",
+            "https://github.com/pnggroup/libpng/security/advisories/GHSA-vgjq-8cw5-ggw8",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-22801",
+            "https://ubuntu.com/security/notices/USN-7963-1",
+            "https://ubuntu.com/security/notices/USN-8035-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-22801",
+            "https://www.openwall.com/lists/oss-security/2026/01/12/7"
+          ],
+          "PublishedDate": "2026-01-12T23:15:52.907Z",
+          "LastModifiedDate": "2026-01-21T18:58:18.27Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-25646",
+          "VendorIDs": [
+            "DSA-6138-1"
+          ],
+          "PkgID": "libpng16-16t64@1.6.48-1+deb13u1",
+          "PkgName": "libpng16-16t64",
+          "PkgIdentifier": {
+            "PURL": "pkg:deb/debian/libpng16-16t64@1.6.48-1%2Bdeb13u1?arch=amd64\u0026distro=debian-13.3",
+            "UID": "2538a2da1c3aa646"
+          },
+          "InstalledVersion": "1.6.48-1+deb13u1",
+          "FixedVersion": "1.6.48-1+deb13u3",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:46bf3a120c8ebc0c207a3a819bb44ad7e6bbcd0b27c2c8e7430b8baea6c321d2",
+            "DiffID": "sha256:edcb98f6af683f89a724d9da7bf8927059c91c86db4723a42201cd227340d7b5"
+          },
+          "SeveritySource": "nvd",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-25646",
+          "DataSource": {
+            "ID": "debian",
+            "Name": "Debian Security Tracker",
+            "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+          },
+          "Title": "libpng: LIBPNG has a heap buffer overflow in png_set_quantize",
+          "Description": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. Prior to 1.6.55, an out-of-bounds read vulnerability exists in the png_set_quantize() API function. When the function is called with no histogram and the number of colors in the palette is more than twice the maximum supported by the user's display, certain palettes will cause the function to enter into an infinite loop that reads past the end of an internal heap-allocated buffer. The images that trigger this vulnerability are valid per the PNG specification. This vulnerability is fixed in 1.6.55.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-122",
+            "CWE-126"
+          ],
+          "VendorSeverity": {
+            "azure": 3,
+            "nvd": 3,
+            "photon": 3,
+            "redhat": 3,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 8.1
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+              "V3Score": 7
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2026/02/09/7",
+            "https://access.redhat.com/security/cve/CVE-2026-25646",
+            "https://github.com/pnggroup/libpng/commit/01d03b8453eb30ade759cd45c707e5a1c7277d88",
+            "https://github.com/pnggroup/libpng/security/advisories/GHSA-g8hp-mq4h-rqm3",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-25646",
+            "https://ubuntu.com/security/notices/USN-8035-1",
+            "https://ubuntu.com/security/notices/USN-8039-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-25646"
+          ],
+          "PublishedDate": "2026-02-10T18:16:37.817Z",
+          "LastModifiedDate": "2026-02-13T20:43:44.69Z"
+        }
+      ]
+    }
+  ]
+}
