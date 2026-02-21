@@ -303,11 +303,18 @@ pipeline {
                                     fi
 
                                     echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
-                                    if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
+                                    # Utiliser app list pour vérifier l'existence (plus fiable que app get)
+                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
                                         echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
-                                        argocd app get ${ARGOCD_APP} --grpc-web
+                                        # Essayer d'obtenir les détails, mais ne pas échouer si permission refusée
+                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 || {
+                                            echo "[ARGOCD] ⚠️  Application trouvée mais permissions insuffisantes pour les détails"
+                                            echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
+                                        }
                                     else
                                         echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
+                                        echo "[ARGOCD]    Applications disponibles:"
+                                        argocd app list --grpc-web 2>&1 | head -10 || echo "   (impossible de lister les applications)"
                                         echo "[ARGOCD]    Créez-la manuellement ou via le stage ArgoCD complet"
                                         exit 0
                                     fi
@@ -336,16 +343,21 @@ pipeline {
                                     fi
 
                                     echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
-                                    if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
+                                    # Utiliser app list pour vérifier l'existence (plus fiable que app get)
+                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
+                                        echo "[ARGOCD] Tentative de synchronisation..."
                                         argocd app sync ${ARGOCD_APP} \\
                                             --grpc-web \\
                                             --force || {
                                             echo "[ARGOCD] ⚠️  Échec de la synchronisation"
+                                            echo "[ARGOCD]    Vérifiez les permissions RBAC de l'utilisateur admin dans ArgoCD"
                                             exit 1
                                         }
                                         echo "[ARGOCD] ✅ Application synchronisée avec succès"
                                     else
                                         echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
+                                        echo "[ARGOCD]    Applications disponibles:"
+                                        argocd app list --grpc-web 2>&1 | head -10 || echo "   (impossible de lister les applications)"
                                         exit 0
                                     fi
                                 """
