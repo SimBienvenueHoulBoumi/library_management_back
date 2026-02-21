@@ -73,7 +73,7 @@ pipeline {
                             script {
                                 // Vérifier si les rapports existent avant de les archiver
                                 def reportsExist = sh(
-                                    script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1',
+                                    script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true',
                                     returnStdout: true
                                 ).trim()
                                 
@@ -81,7 +81,16 @@ pipeline {
                                     echo "[UT] 📊 Archivage des résultats de tests unitaires..."
                                     junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 } else {
-                                    echo "[UT] ⚠️  Aucun rapport de test unitaire trouvé dans target/surefire-reports/"
+                                    echo "[UT] ⚠️  Aucun rapport de test unitaire trouvé, génération d'un rapport vide..."
+                                    sh '''
+                                        mkdir -p target/surefire-reports
+                                        cat > target/surefire-reports/TEST-empty.xml << 'EOF'
+                                        <?xml version="1.0" encoding="UTF-8"?>
+                                        <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
+                                        </testsuite>
+                                        EOF
+                                    '''
+                                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 }
                             }
                         }
@@ -97,7 +106,7 @@ pipeline {
                             script {
                                 // Vérifier si les rapports existent avant de les archiver
                                 def reportsExist = sh(
-                                    script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1',
+                                    script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true',
                                     returnStdout: true
                                 ).trim()
                                 
@@ -105,7 +114,16 @@ pipeline {
                                     echo "[IT] 📊 Archivage des résultats de tests d'intégration..."
                                     junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 } else {
-                                    echo "[IT] ⚠️  Aucun rapport de test d'intégration trouvé dans target/failsafe-reports/"
+                                    echo "[IT] ⚠️  Aucun rapport de test d'intégration trouvé, génération d'un rapport vide..."
+                                    sh '''
+                                        mkdir -p target/failsafe-reports
+                                        cat > target/failsafe-reports/TEST-empty.xml << 'EOF'
+                                            <?xml version="1.0" encoding="UTF-8"?>
+                                            <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
+                                            </testsuite>
+                                            EOF
+                                    '''
+                                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 }
                             }
                         }
@@ -255,8 +273,8 @@ pipeline {
             )
             script {
                 // Archiver les rapports JUnit s'ils existent
-                def surefireExists = sh(script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1', returnStdout: true).trim()
-                def failsafeExists = sh(script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1', returnStdout: true).trim()
+                def surefireExists = sh(script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true', returnStdout: true).trim()
+                def failsafeExists = sh(script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true', returnStdout: true).trim()
                 
                 if (surefireExists || failsafeExists) {
                     junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml, target/failsafe-reports/*.xml'
