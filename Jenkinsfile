@@ -70,7 +70,20 @@ pipeline {
                     }
                     post {
                         always {
-                            junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
+                            script {
+                                // Vérifier si les rapports existent avant de les archiver
+                                def reportsExist = sh(
+                                    script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1',
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (reportsExist) {
+                                    echo "[UT] 📊 Archivage des résultats de tests unitaires..."
+                                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                } else {
+                                    echo "[UT] ⚠️  Aucun rapport de test unitaire trouvé dans target/surefire-reports/"
+                                }
+                            }
                         }
                     }
                 }
@@ -81,7 +94,20 @@ pipeline {
                     }
                     post {
                         always {
-                            junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true
+                            script {
+                                // Vérifier si les rapports existent avant de les archiver
+                                def reportsExist = sh(
+                                    script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1',
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (reportsExist) {
+                                    echo "[IT] 📊 Archivage des résultats de tests d'intégration..."
+                                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                } else {
+                                    echo "[IT] ⚠️  Aucun rapport de test d'intégration trouvé dans target/failsafe-reports/"
+                                }
+                            }
                         }
                     }
                 }
@@ -227,7 +253,17 @@ pipeline {
                 allowEmptyArchive: true,
                 fingerprint: true
             )
-            junit allowEmptyResults: true, testResults: '**/surefire-reports/*.xml, **/failsafe-reports/*.xml'
+            script {
+                // Archiver les rapports JUnit s'ils existent
+                def surefireExists = sh(script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1', returnStdout: true).trim()
+                def failsafeExists = sh(script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1', returnStdout: true).trim()
+                
+                if (surefireExists || failsafeExists) {
+                    junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml, target/failsafe-reports/*.xml'
+                } else {
+                    echo "⚠️  Aucun rapport de test trouvé"
+                }
+            }
         }
         success  { echo "✅ Pipeline completed successfully" }
         failure  { echo "❌ Pipeline failed – check reports (Sonar, Snyk, Trivy)" }
