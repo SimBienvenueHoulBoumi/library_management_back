@@ -66,7 +66,8 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
-                        sh './mvnw clean test -DskipITs'
+                        // Tests unitaires uniquement (Surefire) : exclut automatiquement **/services/integration/**
+                        sh './mvnw clean test -DskipITs=true -DskipUnitTests=false'
                     }
                     post {
                         always {
@@ -99,7 +100,8 @@ pipeline {
 
                 stage('Integration Tests') {
                     steps {
-                        sh './mvnw verify -DskipUnitTests'
+                        // Tests d'intégration uniquement (Failsafe) : inclut uniquement **/services/integration/**
+                        sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
                     }
                     post {
                         always {
