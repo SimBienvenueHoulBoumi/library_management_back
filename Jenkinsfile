@@ -333,6 +333,11 @@ pipeline {
                                         fi
                                         
                                         # Créer l'application
+                                        echo "[ARGOCD] Création de l'application ${ARGOCD_APP}..."
+                                        echo "[ARGOCD]   Repository: ${gitRepoHttps}"
+                                        echo "[ARGOCD]   Path: ${ARGOCD_CHART_PATH}"
+                                        echo "[ARGOCD]   Namespace: ${ARGOCD_NS}"
+                                        
                                         argocd app create ${ARGOCD_APP} \\
                                             --repo "${gitRepoHttps}" \\
                                             --path ${ARGOCD_CHART_PATH} \\
@@ -342,8 +347,18 @@ pipeline {
                                             --self-heal \\
                                             --auto-prune \\
                                             --grpc-web || {
-                                            echo "[ARGOCD] ⚠️  Échec de la création de l'application"
-                                            echo "[ARGOCD]    Vérifiez que le repository et le chart path existent"
+                                            echo "[ARGOCD] ❌ Échec de la création de l'application"
+                                            echo "[ARGOCD]    Raisons possibles :"
+                                            echo "[ARGOCD]    1. Le chemin '${ARGOCD_CHART_PATH}' n'existe pas dans le repository"
+                                            echo "[ARGOCD]    2. Le repository n'est pas accessible"
+                                            echo "[ARGOCD]    3. Le chart Helm est invalide"
+                                            echo "[ARGOCD]    "
+                                            echo "[ARGOCD]    Actions suggérées :"
+                                            echo "[ARGOCD]    - Vérifiez que le chemin '${ARGOCD_CHART_PATH}' existe dans le repo"
+                                            echo "[ARGOCD]    - Ou créez le chart Helm à cet emplacement"
+                                            echo "[ARGOCD]    - Ou modifiez ARGOCD_CHART_PATH dans le Jenkinsfile"
+                                            echo "[ARGOCD]    "
+                                            echo "[ARGOCD]    Le build continue, mais l'application ArgoCD n'a pas été créée"
                                             exit 0
                                         }
                                         echo "[ARGOCD] ✅ Application ${ARGOCD_APP} créée avec succès"
