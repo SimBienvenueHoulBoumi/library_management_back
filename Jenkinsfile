@@ -24,9 +24,10 @@ pipeline {
         GIT_CREDENTIALS    = 'JENKINS_AGENT'
 
         // ─── Container Registry ─────────────────────────────────────────
-        NEXUS_REGISTRY     = 'localhost:8083'  // ← À sécuriser / passer en HTTPS si possible
+        // Note: Utiliser http:// explicitement car Nexus fonctionne en HTTP
+        NEXUS_REGISTRY     = 'http://localhost:8083'  // HTTP explicite pour éviter HTTPS par défaut
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
-        IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+        IMAGE_REPO         = "localhost:8083/simdev/${PROJECT_NAME}"  // Sans http:// pour les tags Docker
         // Pour Kubernetes, utiliser host.docker.internal au lieu de localhost
         K8S_IMAGE_REPO     = "host.docker.internal:8083/simdev/${PROJECT_NAME}"
 
@@ -258,8 +259,12 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh """
-                        echo "\${PASS}" | docker login ${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || {
-                            echo "Registry login failed → check insecure-registries on Docker host"
+                        # Utiliser http:// explicitement pour forcer HTTP (Nexus n'utilise pas HTTPS)
+                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || {
+                            echo "[REGISTRY] ❌ Échec de connexion à http://${NEXUS_REGISTRY}"
+                            echo "[REGISTRY]    Solution: Configurer Docker Desktop pour accepter les registries HTTP"
+                            echo "[REGISTRY]    Settings > Docker Engine > Ajouter:"
+                            echo "[REGISTRY]    \"insecure-registries\": [\"localhost:8083\", \"host.docker.internal:8083\"]"
                             exit 1
                         }
 
