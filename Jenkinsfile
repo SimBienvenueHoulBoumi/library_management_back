@@ -284,7 +284,7 @@ pipeline {
            Commented out – Push to registry
            Uncomment when Nexus is properly reachable from the agent
         ──────────────────────────────────────────────────────────────── */
-        /*
+
         stage('📦 Push Images') {
             when { expression { shouldBuildAndPush() } }
             steps {
@@ -308,7 +308,6 @@ pipeline {
                 }
             }
         }
-        */
 
         /* ────────────────────────────────────────────────────────────────
            Commented out – ArgoCD GitOps integration
