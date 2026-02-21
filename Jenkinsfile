@@ -68,12 +68,12 @@ pipeline {
         stage('🧪 Tests') {
             parallel {
                 stage('Unit Tests') {
-                    steps {
+            steps {
                         // Tests unitaires uniquement (Surefire) : exclut automatiquement **/services/integration/**
                         sh './mvnw clean test -DskipITs=true -DskipUnitTests=false'
-                    }
-                    post {
-                        always {
+            }
+            post {
+                always {
                             script {
                                 // Vérifier si les rapports existent avant de les archiver
                                 def reportsExist = sh(
@@ -102,12 +102,12 @@ pipeline {
                 }
 
                 stage('Integration Tests') {
-                    steps {
+            steps {
                         // Tests d'intégration uniquement (Failsafe) : inclut uniquement **/services/integration/**
-                        sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
-                    }
-                    post {
-                        always {
+                sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
+            }
+            post {
+                always {
                             script {
                                 // Vérifier si les rapports existent avant de les archiver
                                 def reportsExist = sh(
@@ -153,7 +153,7 @@ pipeline {
                         def shouldFail = FAIL_ON_SONAR == 'true'
                         
                         sh """
-                            ./mvnw sonar:sonar \
+                        ./mvnw sonar:sonar \
                                 -Dsonar.host.url=${SONAR_URL} \
                                 -Dsonar.token=${TOKEN} \
                                 -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
@@ -205,10 +205,10 @@ pipeline {
             when { expression { shouldBuildAndPush() } }
             parallel {
                 stage('Snyk') {
-                    steps {
+            steps {
                         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'TOKEN')]) {
                             sh """
-                                mkdir -p reports/snyk
+                        mkdir -p reports/snyk
                                 snyk container test ${IMAGE_REPO}:${BUILD_NUMBER} \
                                     --json-file-output=reports/snyk/snyk.json \
                                     --severity-threshold=high || echo "Snyk issues found (fail=${FAIL_ON_SNYK})"
@@ -284,8 +284,8 @@ pipeline {
                     }
                 }
 
-                stage('📱 ArgoCD App Check') {
-                    steps {
+                stage('📱 ArgoCD App Check/Create') {
+            steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
@@ -305,7 +305,7 @@ pipeline {
                                     echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
                                     # Utiliser app list pour vérifier l'existence (plus fiable que app get)
                                     if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
-                                        echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
+                                        echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe déjà"
                                         # Essayer d'obtenir les détails, mais ne pas échouer si permission refusée
                                         argocd app get ${ARGOCD_APP} --grpc-web 2>&1 || {
                                             echo "[ARGOCD] ⚠️  Application trouvée mais permissions insuffisantes pour les détails"
@@ -313,10 +313,41 @@ pipeline {
                                         }
                                     else
                                         echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
-                                        echo "[ARGOCD]    Applications disponibles:"
-                                        argocd app list --grpc-web 2>&1 | head -10 || echo "   (impossible de lister les applications)"
-                                        echo "[ARGOCD]    Créez-la manuellement ou via le stage ArgoCD complet"
-                                        exit 0
+                                        echo "[ARGOCD]    Tentative de création..."
+                                        
+                                        # Convertir l'URL SSH en HTTPS pour ArgoCD
+                                        GIT_REPO_SSH="${GIT_REPO_URL}"
+                                        GIT_REPO_HTTPS=\$(echo "\${GIT_REPO_SSH}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\\.git$||')
+                                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
+                                        
+                                        echo "[ARGOCD] URL Git: \${GIT_REPO_HTTPS}"
+                                        echo "[ARGOCD] Chart path: ${ARGOCD_CHART_PATH}"
+                                        
+                                        # Vérifier si le repo existe dans ArgoCD
+                                        if ! argocd repo get "\${GIT_REPO_HTTPS}" --grpc-web &>/dev/null; then
+                                            echo "[ARGOCD] Ajout du repository Git..."
+                                            argocd repo add "\${GIT_REPO_HTTPS}" \\
+                                                --name ${PROJECT_NAME}-repo \\
+                                                --insecure-skip-server-verification --grpc-web || {
+                                                echo "[ARGOCD] ⚠️  Échec de l'ajout du repository (peut-être déjà existant)"
+                                            }
+                                        fi
+                                        
+                                        # Créer l'application
+                                        argocd app create ${ARGOCD_APP} \\
+                                            --repo "\${GIT_REPO_HTTPS}" \\
+                                            --path ${ARGOCD_CHART_PATH} \\
+                                            --dest-server https://kubernetes.default.svc \\
+                                            --dest-namespace ${ARGOCD_NS} \\
+                                            --sync-policy automated \\
+                                            --self-heal \\
+                                            --auto-prune \\
+                                            --grpc-web || {
+                                            echo "[ARGOCD] ⚠️  Échec de la création de l'application"
+                                            echo "[ARGOCD]    Vérifiez que le repository et le chart path existent"
+                                            exit 0
+                                        }
+                                        echo "[ARGOCD] ✅ Application ${ARGOCD_APP} créée avec succès"
                                     fi
                                 """
                             }
