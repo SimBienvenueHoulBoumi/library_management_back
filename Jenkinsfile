@@ -51,7 +51,7 @@ pipeline {
         stage('📥 Checkout & Detect Version') {
             steps {
                 deleteDir()
-                git branch: BRANCH_NAME ?: 'main',
+                git branch: env.BRANCH_NAME ?: 'main',
                     url: GIT_REPO_URL,
                     credentialsId: GIT_CREDENTIALS
 
@@ -234,5 +234,5 @@ pipeline {
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
 def shouldBuildAndPush() {
-    return (BRANCH_NAME == null || BRANCH_NAME == 'main' || BRANCH_NAME.startsWith('release/') || BRANCH_NAME.startsWith('hotfix/'))
+    return (env.BRANCH_NAME == null || env.BRANCH_NAME == 'main' || env.BRANCH_NAME.startsWith('release/') || env.BRANCH_NAME.startsWith('hotfix/'))
 }
