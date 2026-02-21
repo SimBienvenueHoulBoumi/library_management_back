@@ -562,10 +562,26 @@ pipeline {
                             --grpc-web \\
                             --insecure || exit 1
                         
-                        if ! argocd repo get ${GIT_REPO_URL} &>/dev/null; then
-                            argocd repo add ${GIT_REPO_URL} \\
+                        # Convertir l'URL SSH en HTTPS pour ArgoCD (plus simple, pas besoin de SSH_AUTH_SOCK)
+                        GIT_REPO_HTTPS=\$(echo "${GIT_REPO_URL}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\.git$||')
+                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
+                        
+                        echo "[ARGOCD] URL SSH: ${GIT_REPO_URL}"
+                        echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
+                        
+                        # Vérifier si le repo existe déjà (en utilisant l'URL HTTPS)
+                        if ! argocd repo get "\${GIT_REPO_HTTPS}" &>/dev/null; then
+                            echo "[ARGOCD] Ajout du repository Git (HTTPS)..."
+                            # Pour HTTPS, on peut utiliser --insecure-skip-server-verification
+                            # OU configurer des credentials si le repo est privé
+                            argocd repo add "\${GIT_REPO_HTTPS}" \\
                                 --name ${PROJECT_NAME}-repo \\
-                                --insecure-skip-server-verification || true
+                                --insecure-skip-server-verification || {
+                                echo "[ARGOCD] ⚠️  Échec de l'ajout du repo, peut-être privé. Vérifiez les credentials."
+                                exit 1
+                            }
+                        else
+                            echo "[ARGOCD] ✅ Repository déjà configuré"
                         fi
                     """
                 }
@@ -597,15 +613,29 @@ pipeline {
                             --grpc-web \\
                             --insecure || exit 1
                         
+                        # Convertir l'URL SSH en HTTPS pour ArgoCD
+                        GIT_REPO_HTTPS=\$(echo "${GIT_REPO_URL}" | sed 's|git@github.com:|https://github.com/|' | sed 's|\.git$||')
+                        GIT_REPO_HTTPS="\${GIT_REPO_HTTPS}.git"
+                        
+                        echo "[ARGOCD] URL SSH: ${GIT_REPO_URL}"
+                        echo "[ARGOCD] URL HTTPS: \${GIT_REPO_HTTPS}"
+                        
                         if ! argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
+                            echo "[ARGOCD] Création de l'application ${ARGOCD_APP_NAME}..."
                             argocd app create ${ARGOCD_APP_NAME} \\
-                                --repo ${GIT_REPO_URL} \\
+                                --repo "\${GIT_REPO_HTTPS}" \\
                                 --path ${ARGOCD_CHART_PATH} \\
                                 --dest-server https://kubernetes.default.svc \\
                                 --dest-namespace ${ARGOCD_NAMESPACE} \\
                                 --sync-policy automated \\
                                 --self-heal \\
-                                --auto-prune || exit 1
+                                --auto-prune || {
+                                echo "[ARGOCD] ❌ Échec de la création de l'application"
+                                exit 1
+                            }
+                            echo "[ARGOCD] ✅ Application créée avec succès"
+                        else
+                            echo "[ARGOCD] ✅ Application ${ARGOCD_APP_NAME} existe déjà"
                         fi
                     """
                 }
