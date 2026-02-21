@@ -1,0 +1,110 @@
+# Default values for library-management
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: localhost:8083/simdev/library-management
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  # Le tag sera mis à jour automatiquement par ArgoCD via le pipeline Jenkins
+  tag: "0.0.1-SNAPSHOT"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8075
+  targetPort: 8075
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: library-management.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: library-management-tls
+  #    hosts:
+  #      - library-management.local
+
+resources:
+  # We usually recommend not to specify default resources and to leave this as a comment
+  # to allow autoscaling based on memory/cpu, but for demo purposes we set defaults.
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Configuration pour l'application Spring Boot
+config:
+  # Variables d'environnement
+  env: []
+  # Exemple:
+  # - name: SPRING_PROFILES_ACTIVE
+  #   value: "prod"
+  # - name: SPRING_DATASOURCE_URL
+  #   value: "jdbc:postgresql://postgres:5432/librarydb"
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /actuator/health
+    port: 8075
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health
+    port: 8075
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
