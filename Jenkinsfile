@@ -494,7 +494,7 @@ pipeline {
             steps {
                 sh """
                     # Extraire HOST et PORT de l'URL (peut contenir http:// ou https://)
-                    ARGOCD_URL=\$(echo ${env.ARGOCD_SERVER} | sed 's|^https\?://||')
+                    ARGOCD_URL=\$(echo ${env.ARGOCD_SERVER} | sed 's|^https\\?://||')
                     HOST=\$(echo \$ARGOCD_URL | cut -d: -f1)
                     PORT=\$(echo \$ARGOCD_URL | cut -d: -f2)
                     
