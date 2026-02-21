@@ -84,7 +84,7 @@ pipeline {
         // Pour démarrer ArgoCD: cd infra && ./start-argocd.sh
         // Pour démarrer le service proxy: docker compose up -d argocd-proxy
         ARGOCD_ENABLED       = "true"  // Mettre à "false" pour désactiver le déploiement ArgoCD
-        ARGOCD_SERVER        = "argocd-proxy:8084"  // Service nginx proxy dans docker-compose (même réseau Docker)
+        ARGOCD_SERVER        = "http://argocd-proxy:8084"  // Service nginx proxy dans docker-compose (même réseau Docker)
         ARGOCD_APP_NAME      = "${PROJECT_NAME}"
         ARGOCD_CREDENTIALS   = "ARGOCD_PASSWORD"
         ARGOCD_NAMESPACE     = "default"  // Namespace Kubernetes de destination
@@ -493,8 +493,10 @@ pipeline {
             }
             steps {
                 sh """
-                    HOST=\$(echo ${env.ARGOCD_SERVER} | cut -d: -f1)
-                    PORT=\$(echo ${env.ARGOCD_SERVER} | cut -d: -f2)
+                    # Extraire HOST et PORT de l'URL (peut contenir http:// ou https://)
+                    ARGOCD_URL=\$(echo ${env.ARGOCD_SERVER} | sed 's|^https\?://||')
+                    HOST=\$(echo \$ARGOCD_URL | cut -d: -f1)
+                    PORT=\$(echo \$ARGOCD_URL | cut -d: -f2)
                     
                     if ! timeout 5 bash -c "echo > /dev/tcp/\$HOST/\$PORT" 2>/dev/null; then
                         exit 1
@@ -513,9 +515,11 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${env.ARGOCD_SERVER} \\
+                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
+                        yes | argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
+                            --plaintext \\
                             --insecure || exit 1
                     """
                 }
@@ -532,9 +536,11 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${env.ARGOCD_SERVER} \\
+                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
+                        yes | argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
+                            --plaintext \\
                             --insecure || exit 1
                         
                         if ! argocd repo get ${GIT_REPO_URL} &>/dev/null; then
@@ -557,9 +563,11 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${env.ARGOCD_SERVER} \\
+                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
+                        yes | argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
+                            --plaintext \\
                             --insecure || exit 1
                         
                         if ! argocd app get ${ARGOCD_APP_NAME} &>/dev/null; then
@@ -587,9 +595,11 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${env.ARGOCD_SERVER} \\
+                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
+                        yes | argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
+                            --plaintext \\
                             --insecure || exit 1
                         
                         argocd app set ${ARGOCD_APP_NAME} \\
@@ -611,9 +621,11 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: "${ARGOCD_CREDENTIALS}", variable: 'ARGOCD_PASS')]) {
                     sh """
-                        argocd login ${env.ARGOCD_SERVER} \\
+                        # Utiliser yes pour répondre automatiquement à la confirmation si nécessaire
+                        yes | argocd login ${env.ARGOCD_SERVER} \\
                             --username admin \\
                             --password "\${ARGOCD_PASS}" \\
+                            --plaintext \\
                             --insecure || exit 1
                         
                         argocd app wait ${ARGOCD_APP_NAME} \\
