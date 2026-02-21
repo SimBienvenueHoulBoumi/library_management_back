@@ -286,40 +286,70 @@ pipeline {
 
                 stage('📱 ArgoCD App Check') {
                     steps {
-                        script {
-                            sh """
-                                echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
-                                if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
-                                    echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
-                                    argocd app get ${ARGOCD_APP} --grpc-web
-                                else
-                                    echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
-                                    echo "[ARGOCD]    Créez-la manuellement ou via le stage ArgoCD complet"
-                                    exit 0
-                                fi
-                            """
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                            script {
+                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+
+                                sh """
+                                    # Vérifier si la session est toujours valide, sinon se reconnecter
+                                    if ! argocd account get --grpc-web &>/dev/null; then
+                                        echo "[ARGOCD] Session expirée, reconnexion..."
+                                        yes | argocd login ${host} \\
+                                            --username admin \\
+                                            --password "\${ARGOCD_PASS}" \\
+                                            --plaintext \\
+                                            --grpc-web \\
+                                            --insecure || exit 1
+                                    fi
+
+                                    echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
+                                    if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
+                                        echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe"
+                                        argocd app get ${ARGOCD_APP} --grpc-web
+                                    else
+                                        echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
+                                        echo "[ARGOCD]    Créez-la manuellement ou via le stage ArgoCD complet"
+                                        exit 0
+                                    fi
+                                """
+                            }
                         }
                     }
                 }
 
                 stage('🔄 ArgoCD Sync') {
                     steps {
-                        script {
-                            sh """
-                                echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
-                                if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
-                                    argocd app sync ${ARGOCD_APP} \\
-                                        --grpc-web \\
-                                        --force || {
-                                        echo "[ARGOCD] ⚠️  Échec de la synchronisation"
-                                        exit 1
-                                    }
-                                    echo "[ARGOCD] ✅ Application synchronisée avec succès"
-                                else
-                                    echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
-                                    exit 0
-                                fi
-                            """
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                            script {
+                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+
+                                sh """
+                                    # Vérifier si la session est toujours valide, sinon se reconnecter
+                                    if ! argocd account get --grpc-web &>/dev/null; then
+                                        echo "[ARGOCD] Session expirée, reconnexion..."
+                                        yes | argocd login ${host} \\
+                                            --username admin \\
+                                            --password "\${ARGOCD_PASS}" \\
+                                            --plaintext \\
+                                            --grpc-web \\
+                                            --insecure || exit 1
+                                    fi
+
+                                    echo "[ARGOCD] Synchronisation de l'application ${ARGOCD_APP}..."
+                                    if argocd app get ${ARGOCD_APP} --grpc-web &>/dev/null; then
+                                        argocd app sync ${ARGOCD_APP} \\
+                                            --grpc-web \\
+                                            --force || {
+                                            echo "[ARGOCD] ⚠️  Échec de la synchronisation"
+                                            exit 1
+                                        }
+                                        echo "[ARGOCD] ✅ Application synchronisée avec succès"
+                                    else
+                                        echo "[ARGOCD] ⚠️  Impossible de synchroniser : application inexistante"
+                                        exit 0
+                                    fi
+                                """
+                            }
                         }
                     }
                 }
