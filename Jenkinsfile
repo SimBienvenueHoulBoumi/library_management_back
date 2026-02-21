@@ -56,8 +56,8 @@ pipeline {
                     credentialsId: GIT_CREDENTIALS
 
                 script {
-                    PROJECT_VERSION = sh(script: './mvnw help:evaluate -Dexpression=project.version -q -DforceStdout', returnStdout: true).trim()
-                    echo "Maven version detected: ${PROJECT_VERSION}"
+                    env.PROJECT_VERSION = sh(script: './mvnw help:evaluate -Dexpression=project.version -q -DforceStdout', returnStdout: true).trim()
+                    echo "Maven version detected: ${env.PROJECT_VERSION}"
                 }
             }
         }
@@ -146,7 +146,7 @@ pipeline {
                             -Dsonar.host.url=${SONAR_URL} \
                             -Dsonar.token=${TOKEN} \
                             -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                            -Dsonar.projectVersion=${PROJECT_VERSION} \
+                            -Dsonar.projectVersion=${env.PROJECT_VERSION} \
                             -Dsonar.qualitygate.wait=${FAIL_ON_SONAR} \
                             -DskipTests
                     """
@@ -160,13 +160,13 @@ pipeline {
                 script {
                     def commitShort = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
 
-                    env.IMAGE_TAGS = [
-                        BUILD_NUMBER,
+                    def imageTags = [
+                        BUILD_NUMBER.toString(),
                         commitShort,
-                        PROJECT_VERSION
+                        env.PROJECT_VERSION
                     ]
 
-                    def fullImages = env.IMAGE_TAGS.collect { tag ->
+                    def fullImages = imageTags.collect { tag ->
                         "${IMAGE_REPO}:${tag}"
                     }
                     
