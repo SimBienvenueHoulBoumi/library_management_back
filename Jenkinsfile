@@ -25,14 +25,14 @@ pipeline {
 
         // ─── Container Registry ─────────────────────────────────────────
         // Note: L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock
-        // Le daemon Docker de l'hôte accède à Nexus via localhost:8083 (port exposé sur l'hôte)
-        // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec localhost:8083
+        // Le daemon Docker de l'hôte accède à Nexus via localhost:8082 (port exposé sur l'hôte)
+        // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec localhost:8082
         // IMPORTANT: Un repository Docker (hosted) doit être créé dans Nexus sur le port 8082 (interne)
-        NEXUS_REGISTRY     = 'localhost:8083'  // Accès via daemon Docker de l'hôte
+        NEXUS_REGISTRY     = 'localhost:8082'  // Accès via daemon Docker de l'hôte
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
         IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
         // Pour Kubernetes, utiliser host.docker.internal pour accéder depuis le cluster
-        K8S_IMAGE_REPO     = "host.docker.internal:8083/simdev/${PROJECT_NAME}"
+        K8S_IMAGE_REPO     = "host.docker.internal:8082/simdev/${PROJECT_NAME}"
 
         // ─── Quality & Security ─────────────────────────────────────────
         SONAR_URL          = 'http://sonarqube:9000'
