@@ -213,9 +213,13 @@ pipeline {
 
                     def imageTags = [
                         BUILD_NUMBER.toString(),
-                        commitShort,
-                        env.PROJECT_VERSION
+                        commitShort
                     ]
+                    
+                    // Ajouter la version seulement si elle n'est pas vide ou null
+                    if (env.PROJECT_VERSION && env.PROJECT_VERSION != 'null' && env.PROJECT_VERSION.trim() != '') {
+                        imageTags.add(env.PROJECT_VERSION)
+                    }
 
                     def fullImages = imageTags.collect { tag ->
                         "${IMAGE_REPO}:${tag}"
@@ -225,7 +229,20 @@ pipeline {
 
                     def tags = fullImages.join(' -t ')
                     sh """
-                        DOCKER_BUILDKIT=1 docker build -t ${tags} .
+                        if docker buildx version &>/dev/null; then
+                            if ! docker buildx ls | grep -q builder; then
+                                docker buildx create --name builder --driver docker-container --bootstrap || true
+                            fi
+
+                            docker buildx use builder || true
+
+                            docker buildx build --load -t ${tags} . || {
+                                echo "BuildKit/buildx échoué, utilisation de docker build classique"
+                                docker build -t ${tags} .
+                            }
+                        else
+                            docker build -t ${tags} .
+                        fi
                     """
                 }
             }
