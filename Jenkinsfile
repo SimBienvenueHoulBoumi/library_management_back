@@ -213,7 +213,7 @@ pipeline {
 
                     def tags = fullImages.join(' -t ')
                     sh """
-                        docker buildx build --load -t ${tags} .
+                        DOCKER_BUILDKIT=1 docker build -t ${tags} .
                     """
                 }
             }
