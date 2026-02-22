@@ -80,6 +80,16 @@ pipeline {
         }
 
         /**
+         * Nettoyage du projet avant les tests
+         * - Supprime le répertoire target pour éviter les conflits entre tests parallèles
+         */
+        stage('🧹 Clean') {
+            steps {
+                sh './mvnw clean || rm -rf target || true'
+            }
+        }
+
+        /**
          * Exécution des tests en parallèle
          * - Unit Tests: Tests unitaires via Surefire (exclut services/integration et services/unit)
          * - Integration Tests: Tests d'intégration via Failsafe (inclut uniquement services/integration et services/unit)
@@ -89,7 +99,7 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
-                        sh './mvnw clean test -DskipITs=true -DskipUnitTests=false'
+                        sh './mvnw test -DskipITs=true -DskipUnitTests=false'
                     }
                     post {
                         always {
