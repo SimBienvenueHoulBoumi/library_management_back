@@ -25,12 +25,12 @@ pipeline {
 
         // ─── Container Registry ─────────────────────────────────────────
         // Note: L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock
-        // Donc il faut utiliser host.docker.internal pour accéder à Nexus sur l'hôte
-        // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec host.docker.internal:8083
-        NEXUS_REGISTRY     = 'host.docker.internal:8083'  // Accès depuis conteneur vers hôte via daemon Docker
+        // Le daemon Docker de l'hôte accède à Nexus via localhost:8083 (port exposé sur l'hôte)
+        // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec localhost:8083
+        NEXUS_REGISTRY     = 'localhost:8083'  // Accès via daemon Docker de l'hôte
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
         IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
-        // Pour Kubernetes, utiliser aussi host.docker.internal
+        // Pour Kubernetes, utiliser host.docker.internal pour accéder depuis le cluster
         K8S_IMAGE_REPO     = "host.docker.internal:8083/simdev/${PROJECT_NAME}"
 
         // ─── Quality & Security ─────────────────────────────────────────
@@ -112,7 +112,9 @@ pipeline {
                 stage('Integration Tests') {
                     steps {
                         // Tests d'intégration uniquement (Failsafe) : inclut uniquement **/services/integration/**
-                        sh './mvnw verify -DskipITs=false -DskipUnitTests=true'
+                        // Compile d'abord pour créer target/classes, puis verify pour les IT
+                        // Note: Pas de 'clean' ici car les stages sont en parallèle et partagent le workspace
+                        sh './mvnw compile verify -DskipITs=false -DskipUnitTests=true'
                     }
                     post {
                         always {
