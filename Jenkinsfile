@@ -27,6 +27,7 @@ pipeline {
         // Note: L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock
         // Le daemon Docker de l'hôte accède à Nexus via localhost:8083 (port exposé sur l'hôte)
         // IMPORTANT: Docker Desktop doit avoir insecure-registries configuré avec localhost:8083
+        // IMPORTANT: Un repository Docker (hosted) doit être créé dans Nexus sur le port 8082 (interne)
         NEXUS_REGISTRY     = 'localhost:8083'  // Accès via daemon Docker de l'hôte
         REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
         IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
