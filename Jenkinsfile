@@ -151,7 +151,7 @@ pipeline {
 
         /**
          * Analyse de qualité du code avec SonarQube
-         * - Exécuté uniquement sur la branche main et les pull requests
+         * - Exécuté sur main, release/*, hotfix/* et les pull requests
          * - Attend le quality gate (sonar.qualitygate.wait=true)
          * - FAIL_ON_SONAR contrôle si le build échoue en cas d'échec du quality gate
          */
@@ -159,6 +159,8 @@ pipeline {
             when {
                 anyOf {
                     branch 'main'
+                    branch pattern: 'release/.*', comparator: 'REGEXP'
+                    branch pattern: 'hotfix/.*', comparator: 'REGEXP'
                     changeRequest()
                 }
             }
