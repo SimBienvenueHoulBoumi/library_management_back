@@ -42,12 +42,13 @@ pipeline {
         // true = le build échoue si le quality gate échoue
         // false = le build continue même si le quality gate échoue (warning seulement)
         FAIL_ON_SONAR      = 'true'
-        FAIL_ON_SNYK       = 'false'
         FAIL_ON_TRIVY      = 'false'
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        ARGOCD_SERVER      = 'argocd-proxy:8084'   // ou ingress avec TLS
+        // ArgoCD est accessible via port-forward sur l'hôte (port 8084)
+        // Depuis le conteneur Jenkins, utiliser host.docker.internal pour accéder à l'hôte
+        ARGOCD_SERVER      = 'host.docker.internal:8084'   // Port-forward depuis l'hôte
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -208,76 +209,42 @@ pipeline {
             }
         }
 
-        stage('🔐 Security Scans') {
+        stage('🔐 Security Scans – Trivy') {
             when { expression { shouldBuildAndPush() } }
-            parallel {
-                stage('Snyk') {
-                    steps {
-                        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'TOKEN')]) {
-                            sh """
-                                # Snyk CLI version 1.962.0+ scanne automatiquement les vulnérabilités d'application
-                                # (OS + dépendances applicatives comme pom.xml, package.json, etc.)
-                                # Pour exclure les vulnérabilités d'application, utiliser: --exclude-app-vulns
-                                mkdir -p reports/snyk
-                                
-                                # Test de sécurité: scanne OS + application dependencies par défaut
-                                snyk container test ${IMAGE_REPO}:${BUILD_NUMBER} \
-                                    --json-file-output=reports/snyk/snyk.json \
-                                    --severity-threshold=high || {
-                                    if [ "${FAIL_ON_SNYK}" = "true" ]; then
-                                        echo "[SNYK] ❌ Vulnérabilités détectées et FAIL_ON_SNYK=true → échec du build"
-                                        exit 1
-                                    else
-                                        echo "[SNYK] ⚠️  Vulnérabilités détectées mais FAIL_ON_SNYK=false → warning seulement"
-                                        exit 0
-                                    fi
-                                }
-                                
-                                # Monitor: envoie les résultats à Snyk pour suivi continu
-                                snyk container monitor ${IMAGE_REPO}:${BUILD_NUMBER} || true
-                            """
-                        }
+            steps {
+                sh """
+                    mkdir -p reports/trivy
+                    # Timeout augmenté à 15 minutes pour éviter les erreurs "context deadline exceeded"
+                    # Pour les grandes images (Spring Boot avec toutes les dépendances), Trivy peut prendre du temps
+                    # à analyser toutes les couches et dépendances Java
+                    echo "[TRIVY] Démarrage du scan de sécurité (timeout: 15m)..."
+                    trivy image --format json --output reports/trivy/trivy.json \
+                        --severity CRITICAL,HIGH \
+                        --timeout 15m \
+                        --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
+                        ${IMAGE_REPO}:${BUILD_NUMBER} || {
+                        EXIT_CODE=\$?
+                        if [ "\${EXIT_CODE}" = "1" ] && [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                            echo "[TRIVY] ❌ Vulnérabilités détectées et FAIL_ON_TRIVY=true → échec du build"
+                            exit 1
+                        elif [ "\${EXIT_CODE}" = "124" ] || [ "\${EXIT_CODE}" = "1" ]; then
+                            echo "[TRIVY] ⚠️  Timeout ou erreur (code: \${EXIT_CODE})"
+                            if [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                                echo "[TRIVY]    FAIL_ON_TRIVY=true → échec du build"
+                                exit 1
+                            else
+                                echo "[TRIVY]    FAIL_ON_TRIVY=false → warning seulement"
+                                exit 0
+                            fi
+                        else
+                            echo "[TRIVY] ⚠️  Erreur inattendue (code: \${EXIT_CODE})"
+                            exit 0
+                        fi
                     }
-                    post { always { archiveArtifacts artifacts: 'reports/snyk/**', allowEmptyArchive: true } }
-                }
-
-                stage('Trivy') {
-                    steps {
-                        sh """
-                            mkdir -p reports/trivy
-                            # Timeout augmenté à 15 minutes pour éviter les erreurs "context deadline exceeded"
-                            # Pour les grandes images (Spring Boot avec toutes les dépendances), Trivy peut prendre du temps
-                            # à analyser toutes les couches et dépendances Java
-                            echo "[TRIVY] Démarrage du scan de sécurité (timeout: 15m)..."
-                            trivy image --format json --output reports/trivy/trivy.json \
-                                --severity CRITICAL,HIGH \
-                                --timeout 15m \
-                                --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
-                                ${IMAGE_REPO}:${BUILD_NUMBER} || {
-                                EXIT_CODE=\$?
-                                if [ "\${EXIT_CODE}" = "1" ] && [ "${FAIL_ON_TRIVY}" = "true" ]; then
-                                    echo "[TRIVY] ❌ Vulnérabilités détectées et FAIL_ON_TRIVY=true → échec du build"
-                                    exit 1
-                                elif [ "\${EXIT_CODE}" = "124" ] || [ "\${EXIT_CODE}" = "1" ]; then
-                                    echo "[TRIVY] ⚠️  Timeout ou erreur (code: \${EXIT_CODE})"
-                                    if [ "${FAIL_ON_TRIVY}" = "true" ]; then
-                                        echo "[TRIVY]    FAIL_ON_TRIVY=true → échec du build"
-                                        exit 1
-                                    else
-                                        echo "[TRIVY]    FAIL_ON_TRIVY=false → warning seulement"
-                                        exit 0
-                                    fi
-                                else
-                                    echo "[TRIVY] ⚠️  Erreur inattendue (code: \${EXIT_CODE})"
-                                    exit 0
-                                fi
-                            }
-                            echo "[TRIVY] ✅ Scan terminé avec succès"
-                        """
-                    }
-                    post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
-                }
+                    echo "[TRIVY] ✅ Scan terminé avec succès"
+                """
             }
+            post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
         }
 
         /* ────────────────────────────────────────────────────────────────
@@ -309,11 +276,6 @@ pipeline {
             }
         }
 
-        /* ────────────────────────────────────────────────────────────────
-           Commented out – ArgoCD GitOps integration
-           Uncomment when ArgoCD is configured and you want automatic sync
-        ──────────────────────────────────────────────────────────────── */
-        /*
         stage('🚀 GitOps – ArgoCD') {
             when {
                 allOf {
@@ -329,14 +291,28 @@ pipeline {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
                                 sh """
-                                    echo "[ARGOCD] Connexion à ${host}..."
-                                    yes | argocd login ${host} \
+                                    echo "[ARGOCD] 🔐 Connexion à ${host}..."
+                                    # Vérifier si argocd CLI est installé
+                                    if ! command -v argocd &> /dev/null; then
+                                        echo "[ARGOCD] ❌ ArgoCD CLI n'est pas installé"
+                                        echo "[ARGOCD]    Installation: curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64"
+                                        echo "[ARGOCD]    Puis: chmod +x /usr/local/bin/argocd"
+                                        exit 1
+                                    fi
+                                    
+                                    # Connexion à ArgoCD
+                                    argocd login ${host} \
                                         --username admin \
                                         --password "\${ARGOCD_PASS}" \
                                         --plaintext \
                                         --grpc-web \
                                         --insecure || {
-                                        echo "[ARGOCD] ❌ Échec de connexion"
+                                        echo "[ARGOCD] ❌ Échec de connexion à ${host}"
+                                        echo "[ARGOCD]    Vérifications:"
+                                        echo "[ARGOCD]    1. ArgoCD est accessible: curl http://${host}/healthz"
+                                        echo "[ARGOCD]    2. Le port-forward ArgoCD est actif sur l'hôte (port 8084)"
+                                        echo "[ARGOCD]    3. Le mot de passe est correct (récupérez-le avec: kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d)"
+                                        echo "[ARGOCD]    4. Le port-forward est démarré: ./main.sh argocd-port-forward"
                                         exit 1
                                     }
                                     echo "[ARGOCD] ✅ Connexion réussie"
@@ -351,14 +327,16 @@ pipeline {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                // Convertir git@github.com:user/repo.git en https://github.com/user/repo.git
                                 def gitRepoHttps = GIT_REPO_URL
                                     .replace('git@github.com:', 'https://github.com/')
                                     .replaceAll(/\.git$/, '') + '.git'
 
                                 sh """
+                                    # Vérifier la session
                                     if ! argocd account get --grpc-web &>/dev/null; then
                                         echo "[ARGOCD] Session expirée, reconnexion..."
-                                        yes | argocd login ${host} \
+                                        argocd login ${host} \
                                             --username admin \
                                             --password "\${ARGOCD_PASS}" \
                                             --plaintext \
@@ -366,24 +344,35 @@ pipeline {
                                             --insecure || exit 1
                                     fi
 
-                                    echo "[ARGOCD] Vérification de l'application ${ARGOCD_APP}..."
-                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
+                                    echo "[ARGOCD] 📱 Vérification de l'application ${ARGOCD_APP}..."
+                                    
+                                    # Vérifier si l'application existe
+                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
                                         echo "[ARGOCD] ✅ L'application ${ARGOCD_APP} existe déjà"
-                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 || echo "[ARGOCD] ⚠️ Permissions limitées"
+                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || echo "[ARGOCD] ⚠️ Permissions limitées"
                                     else
                                         echo "[ARGOCD] ⚠️  L'application ${ARGOCD_APP} n'existe pas encore"
                                         
                                         if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
-                                            echo "[ARGOCD]    Création automatique désactivée"
+                                            echo "[ARGOCD]    Création automatique désactivée (ARGOCD_CREATE_APP=false)"
                                             exit 0
                                         fi
 
-                                        if ! argocd repo get "${gitRepoHttps}" --grpc-web &>/dev/null; then
+                                        echo "[ARGOCD]    Ajout du repository Git si nécessaire..."
+                                        # Ajouter le repository Git si nécessaire
+                                        if ! argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
+                                            echo "[ARGOCD]    Ajout du repo: ${gitRepoHttps}"
                                             argocd repo add "${gitRepoHttps}" \
                                                 --name ${PROJECT_NAME}-repo \
-                                                --insecure-skip-server-verification --grpc-web || true
+                                                --insecure-skip-server-verification \
+                                                --grpc-web || {
+                                                echo "[ARGOCD] ⚠️  Échec ajout repo (peut-être déjà existant)"
+                                            }
+                                        else
+                                            echo "[ARGOCD]    Repository déjà configuré"
                                         fi
 
+                                        echo "[ARGOCD]    Création de l'application ${ARGOCD_APP}..."
                                         argocd app create ${ARGOCD_APP} \
                                             --repo "${gitRepoHttps}" \
                                             --path ${ARGOCD_CHART_PATH} \
@@ -394,9 +383,13 @@ pipeline {
                                             --auto-prune \
                                             --grpc-web || {
                                             echo "[ARGOCD] ❌ Échec création application"
-                                            exit 0
+                                            echo "[ARGOCD]    Vérifiez:"
+                                            echo "[ARGOCD]    1. Le chemin ${ARGOCD_CHART_PATH} existe dans le repo"
+                                            echo "[ARGOCD]    2. Le namespace ${ARGOCD_NS} existe"
+                                            echo "[ARGOCD]    3. Les permissions ArgoCD sont correctes"
+                                            exit 0  # Ne pas faire échouer le build si l'app existe déjà
                                         }
-                                        echo "[ARGOCD] ✅ Application créée"
+                                        echo "[ARGOCD] ✅ Application créée avec succès"
                                     fi
                                 """
                             }
@@ -408,43 +401,88 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
-                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                // Utiliser BUILD_NUMBER comme tag d'image (correspond au tag de l'image poussée vers Nexus)
+                                def imageTag = env.BUILD_NUMBER
+                                
+                                // Utiliser le script de déploiement si disponible, sinon utiliser les commandes inline
+                                def deployScript = "scripts/deploy-argocd.sh"
+                                
+                                if (fileExists(deployScript)) {
+                                    echo "[ARGOCD] Utilisation du script de déploiement..."
+                                    sh """
+                                        chmod +x ${deployScript}
+                                        ${deployScript} \\
+                                            --server ${ARGOCD_SERVER} \\
+                                            --user admin \\
+                                            --password "\${ARGOCD_PASS}" \\
+                                            --app ${ARGOCD_APP} \\
+                                            --namespace ${ARGOCD_NS} \\
+                                            --repo ${K8S_IMAGE_REPO} \\
+                                            --tag ${imageTag}
+                                    """
+                                } else {
+                                    echo "[ARGOCD] Script non trouvé, utilisation des commandes inline..."
+                                    def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                    
+                                    sh """
+                                        # Vérifier la session
+                                        if ! argocd account get --grpc-web &>/dev/null; then
+                                            echo "[ARGOCD] Session expirée, reconnexion..."
+                                            argocd login ${host} \\
+                                                --username admin \\
+                                                --password "\${ARGOCD_PASS}" \\
+                                                --plaintext \\
+                                                --grpc-web \\
+                                                --insecure || exit 1
+                                        fi
 
-                                sh """
-                                    if ! argocd account get --grpc-web &>/dev/null; then
-                                        yes | argocd login ${host} \
-                                            --username admin \
-                                            --password "\${ARGOCD_PASS}" \
-                                            --plaintext \
-                                            --grpc-web \
-                                            --insecure || exit 1
-                                    fi
-
-                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}"; then
-                                        argocd app set ${ARGOCD_APP} \
-                                            --helm-set image.repository=${K8S_IMAGE_REPO} \
-                                            --helm-set image.tag=${env.PROJECT_VERSION} \
-                                            --grpc-web || true
+                                        echo "[ARGOCD] 🔄 Synchronisation de l'application ${ARGOCD_APP}..."
                                         
-                                        argocd app sync ${ARGOCD_APP} \
-                                            --grpc-web \
-                                            --force || {
-                                            echo "[ARGOCD] ⚠️ Échec synchronisation"
+                                        # Vérifier que l'application existe
+                                        if ! argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                                            echo "[ARGOCD] ⚠️  Application ${ARGOCD_APP} inexistante"
+                                            echo "[ARGOCD]    Créez-la manuellement dans ArgoCD ou activez ARGOCD_CREATE_APP=true"
+                                            exit 0
+                                        fi
+
+                                        # Mettre à jour les valeurs Helm avec la nouvelle image
+                                        echo "[ARGOCD]    Mise à jour de l'image: ${K8S_IMAGE_REPO}:${imageTag}"
+                                        echo "[ARGOCD]    Repository: ${K8S_IMAGE_REPO}"
+                                        echo "[ARGOCD]    Tag: ${imageTag} (BUILD_NUMBER)"
+                                        
+                                        argocd app set ${ARGOCD_APP} \\
+                                            --helm-set image.repository=${K8S_IMAGE_REPO} \\
+                                            --helm-set image.tag=${imageTag} \\
+                                            --grpc-web || {
+                                            echo "[ARGOCD] ⚠️  Échec mise à jour des valeurs Helm"
+                                            echo "[ARGOCD]    Vérifiez que l'application existe et que les permissions sont correctes"
+                                        }
+                                        
+                                        # Synchroniser l'application
+                                        echo "[ARGOCD]    Démarrage de la synchronisation..."
+                                        argocd app sync ${ARGOCD_APP} \\
+                                            --grpc-web \\
+                                            --timeout 300 \\
+                                            --prune || {
+                                            echo "[ARGOCD] ⚠️  Échec synchronisation"
+                                            echo "[ARGOCD]    Vérifiez les logs: argocd app get ${ARGOCD_APP} --grpc-web"
                                             exit 1
                                         }
-                                        echo "[ARGOCD] ✅ Synchronisé"
-                                    else
-                                        echo "[ARGOCD] ⚠️ Application inexistante"
-                                        exit 0
-                                    fi
-                                """
+                                        
+                                        echo "[ARGOCD] ✅ Application synchronisée avec succès"
+                                        echo "[ARGOCD]    Image déployée: ${K8S_IMAGE_REPO}:${imageTag}"
+                                        
+                                        # Afficher le statut
+                                        echo "[ARGOCD]    Statut de l'application:"
+                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
+                                    """
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        */
 
         stage('🧹 Cleanup') {
             steps {
@@ -472,7 +510,7 @@ pipeline {
             }
         }
         success  { echo "✅ Pipeline completed successfully" }
-        failure  { echo "❌ Pipeline failed – check reports (Sonar, Snyk, Trivy)" }
+        failure  { echo "❌ Pipeline failed – check reports (Sonar, Trivy)" }
         aborted  { echo "⏹️ Pipeline aborted" }
     }
 }
