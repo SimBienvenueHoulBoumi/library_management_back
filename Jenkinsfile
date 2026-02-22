@@ -81,8 +81,8 @@ pipeline {
 
         /**
          * Exécution des tests en parallèle
-         * - Unit Tests: Tests unitaires via Surefire (exclut **/services/integration/** et **/services/unit/**)
-         * - Integration Tests: Tests d'intégration via Failsafe (inclut uniquement **/services/integration/** et **/services/unit/**)
+         * - Unit Tests: Tests unitaires via Surefire (exclut services/integration et services/unit)
+         * - Integration Tests: Tests d'intégration via Failsafe (inclut uniquement services/integration et services/unit)
          * Les rapports JUnit sont archivés automatiquement
          */
         stage('🧪 Tests') {
