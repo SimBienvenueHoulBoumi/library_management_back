@@ -100,9 +100,9 @@ pipeline {
                 stage('Unit Tests') {
                     steps {
                         sh './mvnw test -DskipITs=true -DskipUnitTests=false'
-                    }
-                    post {
-                        always {
+            }
+            post {
+                always {
                             script {
                                 def reportsExist = sh(
                                     script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true',
@@ -128,11 +128,11 @@ pipeline {
                 }
 
                 stage('Integration Tests') {
-                    steps {
+            steps {
                         sh './mvnw compile verify -DskipITs=false -DskipUnitTests=true'
-                    }
-                    post {
-                        always {
+            }
+            post {
+                always {
                             script {
                                 def reportsExist = sh(
                                     script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true',
@@ -229,17 +229,18 @@ pipeline {
 
                     def tags = fullImages.join(' -t ')
                     sh """
+                        # Nettoyer les builders buildx en erreur qui peuvent interférer
+                        docker buildx rm --all-inactive 2>/dev/null || true
+                        # Utiliser buildx avec le driver local (docker) si disponible, sinon docker build classique
                         if docker buildx version &>/dev/null; then
-                            if ! docker buildx ls | grep -q builder; then
-                                docker buildx create --name builder --driver docker-container --bootstrap || true
+                            # Créer un builder avec le driver local (docker) qui fonctionne avec toutes les versions
+                            if ! docker buildx ls 2>/dev/null | grep -q "local-builder"; then
+                                docker buildx create --name local-builder --driver docker --use 2>/dev/null || true
+                            else
+                                docker buildx use local-builder 2>/dev/null || true
                             fi
-
-                            docker buildx use builder || true
-
-                            docker buildx build --load -t ${tags} . || {
-                                echo "BuildKit/buildx échoué, utilisation de docker build classique"
-                                docker build -t ${tags} .
-                            }
+                            # Construire avec buildx (driver local)
+                            docker buildx build --load -t ${tags} . || docker build -t ${tags} .
                         else
                             docker build -t ${tags} .
                         fi
@@ -274,7 +275,7 @@ pipeline {
                                 exit 0
                             fi
                         else
-                            exit 0
+                          exit 0
                         fi
                     }
                 """
@@ -323,7 +324,7 @@ pipeline {
                  * - Se connecte via gRPC-Web (--grpc-web) sur host.docker.internal:8084
                  */
                 stage('🔐 ArgoCD Login') {
-                    steps {
+            steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
@@ -374,8 +375,8 @@ pipeline {
                                         argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || true
                                     else
                                         if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
-                                            exit 0
-                                        fi
+                      exit 0
+                    fi
 
                                         if ! argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
                                             argocd repo add "${gitRepoHttps}" \
@@ -407,7 +408,7 @@ pipeline {
                  * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
                  */
                 stage('🔄 ArgoCD Sync') {
-                    steps {
+            steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
                             script {
                                 def imageTag = env.BUILD_NUMBER
