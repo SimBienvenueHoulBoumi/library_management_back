@@ -318,7 +318,7 @@ pipeline {
 
                                 sh """
                                     # Vérifier que ArgoCD CLI est installé
-                                    if ! /usr/local/bin/argocd version --client &>/dev/null; then
+                                    if [ ! -x /usr/local/bin/argocd ]; then
                                         echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                         exit 1
                                     fi
