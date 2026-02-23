@@ -229,21 +229,8 @@ pipeline {
 
                     def tags = fullImages.join(' -t ')
                     sh """
-                        # Nettoyer les builders buildx en erreur qui peuvent interférer
-                        docker buildx rm --all-inactive 2>/dev/null || true
-                        # Utiliser buildx avec le driver local (docker) si disponible, sinon docker build classique
-                        if docker buildx version &>/dev/null; then
-                            # Créer un builder avec le driver local (docker) qui fonctionne avec toutes les versions
-                            if ! docker buildx ls 2>/dev/null | grep -q "local-builder"; then
-                                docker buildx create --name local-builder --driver docker --use 2>/dev/null || true
-                            else
-                                docker buildx use local-builder 2>/dev/null || true
-                            fi
-                            # Construire avec buildx (driver local)
-                            docker buildx build --load -t ${tags} . || docker build -t ${tags} .
-                        else
-                            docker build -t ${tags} .
-                        fi
+                        export DOCKER_BUILDKIT=0
+                        docker build -t ${tags} .
                     """
                 }
             }
