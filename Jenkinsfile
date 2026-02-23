@@ -317,15 +317,18 @@ pipeline {
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
 
                                 sh """
-                                    if ! command -v argocd &> /dev/null; then
+                                    # Vérifier que ArgoCD CLI est installé
+                                    if ! /usr/local/bin/argocd version --client &>/dev/null; then
+                                        echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                         exit 1
                                     fi
                                     
-                                    argocd login ${host} \
-                                        --username admin \
-                                        --password "\${ARGOCD_PASS}" \
-                                        --plaintext \
-                                        --grpc-web \
+                                    # Se connecter à ArgoCD
+                                    /usr/local/bin/argocd login ${host} \\
+                                        --username admin \\
+                                        --password "\${ARGOCD_PASS}" \\
+                                        --plaintext \\
+                                        --grpc-web \\
                                         --insecure || exit 1
                                 """
                             }
@@ -349,37 +352,37 @@ pipeline {
                                     .replaceAll(/\.git$/, '') + '.git'
 
                                 sh """
-                                    if ! argocd account get --grpc-web &>/dev/null; then
-                                        argocd login ${host} \
-                                            --username admin \
-                                            --password "\${ARGOCD_PASS}" \
-                                            --plaintext \
-                                            --grpc-web \
+                                    if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
+                                        /usr/local/bin/argocd login ${host} \\
+                                            --username admin \\
+                                            --password "\${ARGOCD_PASS}" \\
+                                            --plaintext \\
+                                            --grpc-web \\
                                             --insecure || exit 1
                                     fi
 
-                                    if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || true
+                                    if /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                                        /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || true
                                     else
                                         if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
-                      exit 0
-                    fi
+                                            exit 0
+                                        fi
 
-                                        if ! argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
-                                            argocd repo add "${gitRepoHttps}" \
-                                                --name ${PROJECT_NAME}-repo \
-                                                --insecure-skip-server-verification \
+                                        if ! /usr/local/bin/argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
+                                            /usr/local/bin/argocd repo add "${gitRepoHttps}" \\
+                                                --name ${PROJECT_NAME}-repo \\
+                                                --insecure-skip-server-verification \\
                                                 --grpc-web || true
                                         fi
 
-                                        argocd app create ${ARGOCD_APP} \
-                                            --repo "${gitRepoHttps}" \
-                                            --path ${ARGOCD_CHART_PATH} \
-                                            --dest-server https://kubernetes.default.svc \
-                                            --dest-namespace ${ARGOCD_NS} \
-                                            --sync-policy automated \
-                                            --self-heal \
-                                            --auto-prune \
+                                        /usr/local/bin/argocd app create ${ARGOCD_APP} \\
+                                            --repo "${gitRepoHttps}" \\
+                                            --path ${ARGOCD_CHART_PATH} \\
+                                            --dest-server https://kubernetes.default.svc \\
+                                            --dest-namespace ${ARGOCD_NS} \\
+                                            --sync-policy automated \\
+                                            --self-heal \\
+                                            --auto-prune \\
                                             --grpc-web || exit 0
                                     fi
                                 """
@@ -420,8 +423,8 @@ pipeline {
                                     def host = ARGOCD_SERVER.replaceAll('^https?://', '')
                                     
                                     sh """
-                                        if ! argocd account get --grpc-web &>/dev/null; then
-                                            argocd login ${host} \\
+                                        if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
+                                            /usr/local/bin/argocd login ${host} \\
                                                 --username admin \\
                                                 --password "\${ARGOCD_PASS}" \\
                                                 --plaintext \\
@@ -429,21 +432,21 @@ pipeline {
                                                 --insecure || exit 1
                                         fi
 
-                                        if ! argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                                        if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
                                             exit 0
                                         fi
 
-                                        argocd app set ${ARGOCD_APP} \\
+                                        /usr/local/bin/argocd app set ${ARGOCD_APP} \\
                                             --helm-set image.repository=${K8S_IMAGE_REPO} \\
                                             --helm-set image.tag=${imageTag} \\
                                             --grpc-web || true
                                         
-                                        argocd app sync ${ARGOCD_APP} \\
+                                        /usr/local/bin/argocd app sync ${ARGOCD_APP} \\
                                             --grpc-web \\
                                             --timeout 300 \\
                                             --prune || exit 1
                                         
-                                        argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
+                                        /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
                                     """
                                 }
                             }
