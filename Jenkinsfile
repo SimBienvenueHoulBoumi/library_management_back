@@ -47,10 +47,8 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // ArgoCD est accessible via port-forward sur l'hôte (port 8084)
-        // IMPORTANT: Le port-forward doit être actif avant d'exécuter le pipeline
-        // Démarrer avec: cd infra && ./main.sh argocd-port-forward 8084
-        ARGOCD_SERVER      = 'host.docker.internal:8084'   // Port-forward depuis l'hôte (doit être actif)
+        // ArgoCD dans Kubernetes : NodePort 30080 (Kind expose sur l'hôte). Agent Docker → host.docker.internal:30080 (pas de port-forward)
+        ARGOCD_SERVER      = 'host.docker.internal:30080'
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -309,71 +307,34 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD
-                 * - Si kubectl + kubeconfig sont dispo : port-forward dans l'agent puis login sur 127.0.0.1:8084 (évite connection refused)
-                 * - Sinon : health-check sur host.docker.internal:8084 puis login (port-forward manuel sur l'hôte)
+                 * Connexion à ArgoCD (Jenkins dans Docker → ArgoCD dans K8s via NodePort 30080 sur l'hôte)
+                 * Pas de port-forward dans l'agent : on utilise host.docker.internal:30080 (NodePort exposé par Kind).
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
-                        script {
-                            def credList = [string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]
-                            def kubeConfigCredId = env.KUBECONFIG_CREDENTIALS_ID?.trim()
-                            if (kubeConfigCredId) {
-                                credList.add(file(credentialsId: kubeConfigCredId, variable: 'KUBECONFIG_FILE'))
-                            }
-                            withCredentials(credList) {
-                                def kubeConfigPath = env.KUBECONFIG_FILE ?: '/home/jenkins/.kube/config'
-                                def hostFallback = ARGOCD_SERVER.replaceAll('^https?://', '')
-
-                                // Port-forward + login dans le MÊME sh pour que le port-forward soit actif pendant le login (credential ARGOCD_PASS utilisé)
-                                sh """
-                                    if [ ! -x /usr/local/bin/argocd ]; then
-                                        echo "ArgoCD CLI not found at /usr/local/bin/argocd"
-                                        exit 1
-                                    fi
-                                    ARGOCD_HOST="${hostFallback}"
-                                    ok=0
-                                    if command -v kubectl >/dev/null 2>&1 && [ -f '${kubeConfigPath}' ]; then
-                                        cp '${kubeConfigPath}' /tmp/kubeconfig-pf 2>/dev/null || exit 1
-                                        sed -i "s|https://127.0.0.1:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
-                                        sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
-                                        sed -i '/server: https:\\/\\/host.docker.internal/a\\    insecure-skip-tls-verify: true' /tmp/kubeconfig-pf 2>/dev/null || true
-                                        sed -i '/certificate-authority-data:/d' /tmp/kubeconfig-pf 2>/dev/null || true
-                                        sed -i '/certificate-authority:/d' /tmp/kubeconfig-pf 2>/dev/null || true
-                                        pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
-                                        sleep 2
-                                        nohup env KUBECONFIG=/tmp/kubeconfig-pf kubectl port-forward -n argocd svc/argocd-server 8084:80 >>/tmp/argocd-pf.log 2>&1 &
-                                        disown 2>/dev/null || true
-                                        sleep 5
-                                        ok=0
-                                        for i in \$(seq 1 15); do
-                                            if curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1; then ok=1; break; fi
-                                            sleep 2
-                                        done
-                                        if [ "\$ok" = "1" ]; then
-                                            ARGOCD_HOST="127.0.0.1:8084"
-                                            sleep 2
-                                        fi
-                                    fi
-                                    if [ "\$ok" != "1" ]; then
-                                        ok=0
-                                        for i in \$(seq 1 30); do
-                                            if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
-                                            sleep 2
-                                        done
-                                        if [ "\$ok" != "1" ]; then
-                                            echo "ArgoCD unreachable. Port-forward sur l'hôte: cd infra && ./main.sh argocd-port-forward 8084"
-                                            exit 1
-                                        fi
-                                    fi
-                                    /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
-                                        --username admin \\
-                                        --password "\${ARGOCD_PASS}" \\
-                                        --plaintext \\
-                                        --grpc-web \\
-                                        --insecure || exit 1
-                                """
-                            }
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                            sh """
+                                if [ ! -x /usr/local/bin/argocd ]; then
+                                    echo "ArgoCD CLI not found at /usr/local/bin/argocd"
+                                    exit 1
+                                fi
+                                ARGOCD_HOST='${env.ARGOCD_SERVER}'
+                                ok=0
+                                for i in \$(seq 1 30); do
+                                    if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                    sleep 2
+                                done
+                                if [ "\$ok" != "1" ]; then
+                                    echo "ArgoCD unreachable at \$ARGOCD_HOST. Vérifier que le cluster Kind et ArgoCD (NodePort 30080) sont actifs."
+                                    exit 1
+                                fi
+                                /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
+                                    --username admin \\
+                                    --password "\${ARGOCD_PASS}" \\
+                                    --plaintext \\
+                                    --grpc-web \\
+                                    --insecure || exit 1
+                            """
                         }
                     }
                 }
