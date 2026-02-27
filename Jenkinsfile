@@ -48,8 +48,9 @@ pipeline {
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
         // ArgoCD est accessible via port-forward sur l'hôte (port 8084)
-        // Depuis le conteneur Jenkins, utiliser host.docker.internal pour accéder à l'hôte
-        ARGOCD_SERVER      = 'host.docker.internal:8084'   // Port-forward depuis l'hôte
+        // IMPORTANT: Le port-forward doit être actif avant d'exécuter le pipeline
+        // Démarrer avec: cd infra && ./main.sh argocd-port-forward 8084
+        ARGOCD_SERVER      = 'host.docker.internal:8084'   // Port-forward depuis l'hôte (doit être actif)
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -321,6 +322,22 @@ pipeline {
                                     if [ ! -x /usr/local/bin/argocd ]; then
                                         echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                         exit 1
+                                    fi
+
+                                    # Vérifier que le serveur ArgoCD est joignable (port-forward actif)
+                                    if command -v curl >/dev/null 2>&1; then
+                                        ok=0
+                                        for i in 1 2 3 4 5 6 7 8 9 10; do
+                                            if curl -fsS --connect-timeout 2 "http://${host}/healthz" >/dev/null 2>&1; then
+                                                ok=1
+                                                break
+                                            fi
+                                            sleep 1
+                                        done
+                                        if [ "$ok" != "1" ]; then
+                                            echo "ArgoCD unreachable at ${host}. Start port-forward: cd infra && ./main.sh argocd-port-forward 8084"
+                                            exit 1
+                                        fi
                                     fi
                                     
                                     # Se connecter à ArgoCD

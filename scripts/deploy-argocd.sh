@@ -39,6 +39,76 @@ log_warning() {
     echo -e "${YELLOW}[ARGOCD]${NC} ⚠️  $1"
 }
 
+# Références aux scripts d'infra
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+INFRA_MAIN_SCRIPT="$PROJECT_ROOT/infra/main.sh"
+
+strip_proto() {
+    local url="$1"
+    url="${url#http://}"
+    url="${url#https://}"
+    url="${url%/}"
+    echo "$url"
+}
+
+detect_argocd_host() {
+    if ! command -v curl &> /dev/null; then
+        return 1
+    fi
+
+    local hosts=()
+    local seen=()
+
+    for candidate in "$@"; do
+        candidate="$(strip_proto "$candidate")"
+        [ -z "$candidate" ] && continue
+        if printf '%s\n' "${seen[@]}" | grep -qx "$candidate"; then
+            continue
+        fi
+        seen+=("$candidate")
+        hosts+=("$candidate")
+    done
+
+    for candidate in "${hosts[@]}"; do
+        if curl -s --connect-timeout 2 "http://${candidate}/healthz" >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+ensure_port_forward() {
+    local resolved
+    local candidates=("${ARGOCD_SERVER:-}" "localhost:8084" "host.docker.internal:8084")
+
+    if resolved=$(detect_argocd_host "${candidates[@]}"); then
+        ARGOCD_SERVER="$resolved"
+        return 0
+    fi
+
+    if [ -x "$INFRA_MAIN_SCRIPT" ]; then
+        log_info "Démarrage du port-forward ArgoCD via $INFRA_MAIN_SCRIPT"
+        "$INFRA_MAIN_SCRIPT" argocd-port-forward
+    else
+        log_warning "Impossible de lancer '$INFRA_MAIN_SCRIPT' (introuvable)"
+    fi
+
+    sleep 2
+
+    if resolved=$(detect_argocd_host "localhost:8084" "host.docker.internal:8084"); then
+        ARGOCD_SERVER="$resolved"
+        return 0
+    fi
+
+    log_error "ArgoCD reste inaccessible (port-forward ou port incorrect)"
+    log_info "  - Vérifiez que '$INFRA_MAIN_SCRIPT argocd-port-forward' est lancé"
+    log_info "  - Vérifiez que le service argocd-server existe: kubectl get svc -n argocd"
+    exit 1
+}
+
 # Afficher l'aide
 show_help() {
     cat << EOF
@@ -145,7 +215,9 @@ fi
 
 # Fonction pour se connecter à ArgoCD
 argocd_login() {
-    local host=$(echo "$ARGOCD_SERVER" | sed 's|^https\?://||')
+    ensure_port_forward
+    local host
+    host="$(strip_proto "$ARGOCD_SERVER")"
     
     log_info "Connexion à ArgoCD (${host})..."
     
