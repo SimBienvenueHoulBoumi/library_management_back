@@ -308,189 +308,182 @@ pipeline {
             stages {
                 /**
                  * Connexion à ArgoCD
-                 * - Vérifie que la CLI ArgoCD est installée
-                 * - Se connecte via gRPC-Web (--grpc-web) sur host.docker.internal:8084
+                 * - Si kubectl + kubeconfig sont dispo : port-forward dans l'agent puis login sur 127.0.0.1:8084 (évite connection refused)
+                 * - Sinon : health-check sur host.docker.internal:8084 puis login (port-forward manuel sur l'hôte)
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
-                                withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                                    script {
-                                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                            script {
+                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                def useLocalPortForward = false
 
-                                        sh """
-                                            # Vérifier que ArgoCD CLI est installé
-                                            if [ ! -x /usr/local/bin/argocd ]; then
-                                                echo "ArgoCD CLI not found at /usr/local/bin/argocd"
-                                                exit 1
-                                            fi
-
-                                            # Attendre que le serveur ArgoCD soit joignable (port-forward actif, jusqu'à ~90s)
-                                            if command -v curl >/dev/null 2>&1; then
-                                                ok=0
-                                                for i in \$(seq 1 30); do
-                                                    if curl -fsS --connect-timeout 5 "http://${host}/healthz" >/dev/null 2>&1; then
-                                                        ok=1
-                                                        break
-                                                    fi
-                                                    sleep 2
-                                                done
-                                                if [ "\$ok" != "1" ]; then
-                                                    echo "ArgoCD unreachable at ${host}. Start port-forward: cd infra && ./main.sh argocd-port-forward 8084"
-                                                    exit 1
-                                                fi
-                                            fi
-                                            
-                                            # Forcer IPv4 pour argocd (évite "connection refused" si le client tente l'IPv6)
-                                            ARGOCD_IP=\$(getent hosts host.docker.internal 2>/dev/null | awk '\$1 !~ /:/ {print \$1; exit}')
-                                            if [ -z "\$ARGOCD_IP" ] && command -v ping >/dev/null 2>&1; then
-                                                ARGOCD_IP=\$(ping -4 -c 1 host.docker.internal 2>/dev/null | sed -n 's/.*(\\([0-9.]*\\)).*/\\1/p' | head -1)
-                                            fi
-                                            if [ -n "\$ARGOCD_IP" ]; then ARGOCD_LOGIN="\${ARGOCD_IP}:8084"; else ARGOCD_LOGIN="${host}"; fi
-                                            
-                                            # Se connecter à ArgoCD (retries: le port-forward peut être instable)
-                                            n=0
-                                            until [ "\$n" -ge 5 ]; do
-                                                if /usr/local/bin/argocd login "\$ARGOCD_LOGIN" \\
-                                                    --username admin \\
-                                                    --password "\${ARGOCD_PASS}" \\
-                                                    --plaintext \\
-                                                    --grpc-web \\
-                                                    --insecure 2>/dev/null; then
-                                                    exit 0
-                                                fi
-                                                n=\$((n+1))
-                                                sleep 3
-                                            done
-                                            /usr/local/bin/argocd login "\$ARGOCD_LOGIN" \\
-                                                --username admin \\
-                                                --password "\${ARGOCD_PASS}" \\
-                                                --plaintext \\
-                                                --grpc-web \\
-                                                --insecure || exit 1
-                                        """
-                                    }
+                                // Démarrer le port-forward dans l'agent si kubectl et kubeconfig sont présents
+                                def pfStarted = sh(script: '''
+                                    if ! command -v kubectl >/dev/null 2>&1; then exit 1; fi
+                                    if [ ! -f /home/jenkins/.kube/config ]; then exit 1; fi
+                                    cp /home/jenkins/.kube/config /tmp/kubeconfig-pf 2>/dev/null || exit 1
+                                    sed -i "s|https://127.0.0.1:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
+                                    sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
+                                    pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
+                                    sleep 2
+                                    KUBECONFIG=/tmp/kubeconfig-pf nohup kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &
+                                    disown 2>/dev/null || true
+                                    sleep 5
+                                    curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1 && echo "OK" || exit 1
+                                ''', returnStdout: true).trim()
+                                if (pfStarted?.contains('OK')) {
+                                    useLocalPortForward = true
+                                    env.ARGOCD_SERVER = '127.0.0.1:8084'
                                 }
+                                host = env.ARGOCD_SERVER.replaceAll('^https?://', '')
+
+                                sh """
+                                    if [ ! -x /usr/local/bin/argocd ]; then
+                                        echo "ArgoCD CLI not found at /usr/local/bin/argocd"
+                                        exit 1
+                                    fi
+                                    if [ "${useLocalPortForward}" != "true" ]; then
+                                        ok=0
+                                        for i in \$(seq 1 30); do
+                                            if curl -fsS --connect-timeout 5 "http://${host}/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                            sleep 2
+                                        done
+                                        if [ "\$ok" != "1" ]; then
+                                            echo "ArgoCD unreachable. Port-forward in-agent: monter ~/.kube dans l'agent et installer kubectl. Ou sur l'hôte: cd infra && ./main.sh argocd-port-forward 8084"
+                                            exit 1
+                                        fi
+                                    fi
+                                    /usr/local/bin/argocd login ${host} \\
+                                        --username admin \\
+                                        --password "\${ARGOCD_PASS}" \\
+                                        --plaintext \\
+                                        --grpc-web \\
+                                        --insecure || exit 1
+                                """
                             }
                         }
-
-                        /**
-                        * Vérification et création de l'application ArgoCD
-                        * - Vérifie si l'application existe
-                        * - Crée l'application si ARGOCD_CREATE_APP=true
-                        * - Ajoute le repository Git si nécessaire
-                        */
-                        stage('📱 ArgoCD App Check/Create') {
-                            steps {
-                                withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                                    script {
-                                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-                                        def gitRepoHttps = GIT_REPO_URL
-                                            .replace('git@github.com:', 'https://github.com/')
-                                            .replaceAll(/\.git$/, '') + '.git'
-
-                                        sh """
-                                            if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
-                                                /usr/local/bin/argocd login ${host} \\
-                                                    --username admin \\
-                                                    --password "\${ARGOCD_PASS}" \\
-                                                    --plaintext \\
-                                                    --grpc-web \\
-                                                    --insecure || exit 1
-                                            fi
-
-                                            if /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                                                /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || true
-                                            else
-                                                if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
-                                                    exit 0
-                                                fi
-
-                                                if ! /usr/local/bin/argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
-                                                    /usr/local/bin/argocd repo add "${gitRepoHttps}" \\
-                                                        --name ${PROJECT_NAME}-repo \\
-                                                        --insecure-skip-server-verification \\
-                                                        --grpc-web || true
-                                                fi
-
-                                                /usr/local/bin/argocd app create ${ARGOCD_APP} \\
-                                                    --repo "${gitRepoHttps}" \\
-                                                    --path ${ARGOCD_CHART_PATH} \\
-                                                    --dest-server https://kubernetes.default.svc \\
-                                                    --dest-namespace ${ARGOCD_NS} \\
-                                                    --sync-policy automated \\
-                                                    --self-heal \\
-                                                    --auto-prune \\
-                                                    --grpc-web || exit 0
-                                            fi
-                                        """
-                                    }
-                                }
-                            }
-                        }
-
-                        /**
-                        * Synchronisation de l'application ArgoCD
-                        * - Met à jour les valeurs Helm (image.repository et image.tag)
-                        * - Utilise BUILD_NUMBER comme tag d'image
-                        * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
-                        */
-                        stage('🔄 ArgoCD Sync') {
-                    steps {
-                            withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                                script {
-                                    def imageTag = env.BUILD_NUMBER
-                                    def deployScript = "scripts/deploy-argocd.sh"
-                                    
-                                    if (fileExists(deployScript)) {
-                                        sh """
-                                            chmod +x ${deployScript}
-                                            ${deployScript} \\
-                                                --server ${ARGOCD_SERVER} \\
-                                                --user admin \\
-                                                --password "\${ARGOCD_PASS}" \\
-                                                --app ${ARGOCD_APP} \\
-                                                --namespace ${ARGOCD_NS} \\
-                                                --repo ${K8S_IMAGE_REPO} \\
-                                                --tag ${imageTag} \\
-                                                --chart-path ${ARGOCD_CHART_PATH} \\
-                                                --git-repo-url ${GIT_REPO_URL} \\
-                                                --create-app ${ARGOCD_CREATE_APP}
-                                        """
-                                    } else {
-                                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-                                        
-                                        sh """
-                                            if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
-                                                /usr/local/bin/argocd login ${host} \\
-                                                    --username admin \\
-                                                    --password "\${ARGOCD_PASS}" \\
-                                                    --plaintext \\
-                                                    --grpc-web \\
-                                                    --insecure || exit 1
-                                            fi
-
-                                            if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                                                exit 0
-                                            fi
-
-                                            /usr/local/bin/argocd app set ${ARGOCD_APP} \\
-                                                --helm-set image.repository=${K8S_IMAGE_REPO} \\
-                                                --helm-set image.tag=${imageTag} \\
-                                                --grpc-web || true
-                                            
-                                            /usr/local/bin/argocd app sync ${ARGOCD_APP} \\
-                                                --grpc-web \\
-                                                --timeout 300 \\
-                                                --prune || exit 1
-                                            
-                                            /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
-                                        """
-                                    }
-                                }
-                            }
-                        }
-                      }
                     }
+                }
+
+                /**
+                * Vérification et création de l'application ArgoCD
+                * - Vérifie si l'application existe
+                * - Crée l'application si ARGOCD_CREATE_APP=true
+                * - Ajoute le repository Git si nécessaire
+                */
+                // stage('📱 ArgoCD App Check/Create') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                //             script {
+                //                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                //                 def gitRepoHttps = GIT_REPO_URL
+                //                     .replace('git@github.com:', 'https://github.com/')
+                //                     .replaceAll(/\.git$/, '') + '.git'
+
+                //                 sh """
+                //                     if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
+                //                         /usr/local/bin/argocd login ${host} \\
+                //                             --username admin \\
+                //                             --password "\${ARGOCD_PASS}" \\
+                //                             --plaintext \\
+                //                             --grpc-web \\
+                //                             --insecure || exit 1
+                //                     fi
+
+                //                     if /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                //                         /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | head -20 || true
+                //                     else
+                //                         if [ "${ARGOCD_CREATE_APP}" != "true" ]; then
+                //                             exit 0
+                //                         fi
+
+                //                         if ! /usr/local/bin/argocd repo list --grpc-web 2>/dev/null | grep -q "${gitRepoHttps}"; then
+                //                             /usr/local/bin/argocd repo add "${gitRepoHttps}" \\
+                //                                 --name ${PROJECT_NAME}-repo \\
+                //                                 --insecure-skip-server-verification \\
+                //                                 --grpc-web || true
+                //                         fi
+
+                //                         /usr/local/bin/argocd app create ${ARGOCD_APP} \\
+                //                             --repo "${gitRepoHttps}" \\
+                //                             --path ${ARGOCD_CHART_PATH} \\
+                //                             --dest-server https://kubernetes.default.svc \\
+                //                             --dest-namespace ${ARGOCD_NS} \\
+                //                             --sync-policy automated \\
+                //                             --self-heal \\
+                //                             --auto-prune \\
+                //                             --grpc-web || exit 0
+                //                     fi
+                //                 """
+                //             }
+                //         }
+                //     }
+                // }
+
+                /**
+                * Synchronisation de l'application ArgoCD
+                * - Met à jour les valeurs Helm (image.repository et image.tag)
+                * - Utilise BUILD_NUMBER comme tag d'image
+                * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
+                */
+                // stage('🔄 ArgoCD Sync') {
+                //   steps {
+                //             withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                //                 script {
+                //                     def imageTag = env.BUILD_NUMBER
+                //                     def deployScript = "scripts/deploy-argocd.sh"
+                                    
+                //                     if (fileExists(deployScript)) {
+                //                         sh """
+                //                             chmod +x ${deployScript}
+                //                             ${deployScript} \\
+                //                                 --server ${ARGOCD_SERVER} \\
+                //                                 --user admin \\
+                //                                 --password "\${ARGOCD_PASS}" \\
+                //                                 --app ${ARGOCD_APP} \\
+                //                                 --namespace ${ARGOCD_NS} \\
+                //                                 --repo ${K8S_IMAGE_REPO} \\
+                //                                 --tag ${imageTag} \\
+                //                                 --chart-path ${ARGOCD_CHART_PATH} \\
+                //                                 --git-repo-url ${GIT_REPO_URL} \\
+                //                                 --create-app ${ARGOCD_CREATE_APP}
+                //                         """
+                //                     } else {
+                //                         def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                        
+                //                         sh """
+                //                             if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
+                //                                 /usr/local/bin/argocd login ${host} \\
+                //                                     --username admin \\
+                //                                     --password "\${ARGOCD_PASS}" \\
+                //                                     --plaintext \\
+                //                                     --grpc-web \\
+                //                                     --insecure || exit 1
+                //                             fi
+
+                //                             if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                //                                 exit 0
+                //                             fi
+
+                //                             /usr/local/bin/argocd app set ${ARGOCD_APP} \\
+                //                                 --helm-set image.repository=${K8S_IMAGE_REPO} \\
+                //                                 --helm-set image.tag=${imageTag} \\
+                //                                 --grpc-web || true
+                                            
+                //                             /usr/local/bin/argocd app sync ${ARGOCD_APP} \\
+                //                                 --grpc-web \\
+                //                                 --timeout 300 \\
+                //                                 --prune || exit 1
+                                            
+                //                             /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
+                //                         """
+                //                     }
+                //                 }
+                //             }
+                //         }
+                //         }
+                // }
         }
 
         /*
