@@ -323,62 +323,48 @@ pipeline {
                             }
                             withCredentials(credList) {
                                 def kubeConfigPath = env.KUBECONFIG_FILE ?: '/home/jenkins/.kube/config'
-                                def host = ARGOCD_SERVER.replaceAll('^https?://', '')
-                                def useLocalPortForward = false
+                                def hostFallback = ARGOCD_SERVER.replaceAll('^https?://', '')
 
-                                // Démarrer le port-forward dans l'agent si kubectl et kubeconfig sont présents (fichier monté ou credential Jenkins)
-                                def pfStarted = sh(script: """
-                                    if ! command -v kubectl >/dev/null 2>&1; then exit 1; fi
-                                    if [ ! -f '${kubeConfigPath}' ]; then exit 1; fi
-                                    cp '${kubeConfigPath}' /tmp/kubeconfig-pf 2>/dev/null || exit 1
-                                    sed -i "s|https://127.0.0.1:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
-                                    sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
-                                    # Kind cert ne contient pas host.docker.internal → skip TLS verify pour le port-forward
-                                    sed -i '/server: https:\\/\\/host.docker.internal/a\\    insecure-skip-tls-verify: true' /tmp/kubeconfig-pf 2>/dev/null || true
-                                    # kubectl n'accepte pas certificate-authority + insecure-skip-tls-verify → retirer le CA
-                                    sed -i '/certificate-authority-data:/d' /tmp/kubeconfig-pf 2>/dev/null || true
-                                    sed -i '/certificate-authority:/d' /tmp/kubeconfig-pf 2>/dev/null || true
-                                    pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
-                                    sleep 2
-                                    (KUBECONFIG=/tmp/kubeconfig-pf nohup kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &)
-                                    sleep 3
-                                    ok=0
-                                    for i in \$(seq 1 15); do
-                                        if curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1; then ok=1; break; fi
-                                        sleep 2
-                                    done
-                                    if [ "\$ok" != "1" ]; then
-                                        echo "ArgoCD port-forward health check failed. Log:"
-                                        cat /tmp/argocd-pf.log 2>/dev/null || true
-                                        exit 1
-                                    fi
-                                    echo "OK"
-                                """, returnStdout: true).trim()
-                                if (pfStarted?.contains('OK')) {
-                                    useLocalPortForward = true
-                                    host = '127.0.0.1:8084'
-                                    env.ARGOCD_SERVER = '127.0.0.1:8084'
-                                } else {
-                                    host = ARGOCD_SERVER.replaceAll('^https?://', '')
-                                }
-
+                                // Port-forward + login dans le MÊME sh pour que le port-forward soit actif pendant le login (credential ARGOCD_PASS utilisé)
                                 sh """
                                     if [ ! -x /usr/local/bin/argocd ]; then
                                         echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                         exit 1
                                     fi
-                                    if [ "${useLocalPortForward}" != "true" ]; then
+                                    ARGOCD_HOST="${hostFallback}"
+                                    ok=0
+                                    if command -v kubectl >/dev/null 2>&1 && [ -f '${kubeConfigPath}' ]; then
+                                        cp '${kubeConfigPath}' /tmp/kubeconfig-pf 2>/dev/null || exit 1
+                                        sed -i "s|https://127.0.0.1:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
+                                        sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
+                                        sed -i '/server: https:\\/\\/host.docker.internal/a\\    insecure-skip-tls-verify: true' /tmp/kubeconfig-pf 2>/dev/null || true
+                                        sed -i '/certificate-authority-data:/d' /tmp/kubeconfig-pf 2>/dev/null || true
+                                        sed -i '/certificate-authority:/d' /tmp/kubeconfig-pf 2>/dev/null || true
+                                        pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
+                                        sleep 2
+                                        (KUBECONFIG=/tmp/kubeconfig-pf kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &)
+                                        sleep 3
+                                        ok=0
+                                        for i in \$(seq 1 15); do
+                                            if curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1; then ok=1; break; fi
+                                            sleep 2
+                                        done
+                                        if [ "\$ok" = "1" ]; then
+                                            ARGOCD_HOST="127.0.0.1:8084"
+                                        fi
+                                    fi
+                                    if [ "\$ok" != "1" ]; then
                                         ok=0
                                         for i in \$(seq 1 30); do
-                                            if curl -fsS --connect-timeout 5 "http://${host}/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                            if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
                                             sleep 2
                                         done
                                         if [ "\$ok" != "1" ]; then
-                                            echo "ArgoCD unreachable. Port-forward in-agent: monter ~/.kube dans l'agent et installer kubectl. Ou sur l'hôte: cd infra && ./main.sh argocd-port-forward 8084"
+                                            echo "ArgoCD unreachable. Port-forward sur l'hôte: cd infra && ./main.sh argocd-port-forward 8084"
                                             exit 1
                                         fi
                                     fi
-                                    /usr/local/bin/argocd login ${host} \\
+                                    /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
                                         --username admin \\
                                         --password "\${ARGOCD_PASS}" \\
                                         --plaintext \\
