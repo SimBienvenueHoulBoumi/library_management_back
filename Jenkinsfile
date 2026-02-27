@@ -317,8 +317,9 @@ pipeline {
                     steps {
                         script {
                             def credList = [string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]
-                            if (KUBECONFIG_CREDENTIALS_ID?.trim()) {
-                                credList.add(file(credentialsId: KUBECONFIG_CREDENTIALS_ID.trim(), variable: 'KUBECONFIG_FILE'))
+                            def kubeConfigCredId = env.KUBECONFIG_CREDENTIALS_ID?.trim()
+                            if (kubeConfigCredId) {
+                                credList.add(file(credentialsId: kubeConfigCredId, variable: 'KUBECONFIG_FILE'))
                             }
                             withCredentials(credList) {
                                 def kubeConfigPath = env.KUBECONFIG_FILE ?: '/home/jenkins/.kube/config'
