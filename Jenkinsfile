@@ -340,7 +340,20 @@ pipeline {
                                                 fi
                                             fi
                                             
-                                            # Se connecter à ArgoCD
+                                            # Se connecter à ArgoCD (retries: le port-forward peut être instable)
+                                            n=0
+                                            until [ "\$n" -ge 5 ]; do
+                                                if /usr/local/bin/argocd login ${host} \\
+                                                    --username admin \\
+                                                    --password "\${ARGOCD_PASS}" \\
+                                                    --plaintext \\
+                                                    --grpc-web \\
+                                                    --insecure 2>/dev/null; then
+                                                    exit 0
+                                                fi
+                                                n=\$((n+1))
+                                                sleep 3
+                                            done
                                             /usr/local/bin/argocd login ${host} \\
                                                 --username admin \\
                                                 --password "\${ARGOCD_PASS}" \\
