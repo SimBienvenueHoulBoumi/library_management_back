@@ -366,12 +366,12 @@ pipeline {
                     }
                 }
 
-                /**
-                * Vérification et création de l'application ArgoCD
-                * - Vérifie si l'application existe
-                * - Crée l'application si ARGOCD_CREATE_APP=true
-                * - Ajoute le repository Git si nécessaire
-                */
+                // /**
+                // * Vérification et création de l'application ArgoCD
+                // * - Vérifie si l'application existe
+                // * - Crée l'application si ARGOCD_CREATE_APP=true
+                // * - Ajoute le repository Git si nécessaire
+                // */
                 // stage('📱 ArgoCD App Check/Create') {
                 //     steps {
                 //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
@@ -421,12 +421,12 @@ pipeline {
                 //     }
                 // }
 
-                /**
-                * Synchronisation de l'application ArgoCD
-                * - Met à jour les valeurs Helm (image.repository et image.tag)
-                * - Utilise BUILD_NUMBER comme tag d'image
-                * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
-                */
+                // /**
+                // * Synchronisation de l'application ArgoCD
+                // * - Met à jour les valeurs Helm (image.repository et image.tag)
+                // * - Utilise BUILD_NUMBER comme tag d'image
+                // * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
+                // */
                 // stage('🔄 ArgoCD Sync') {
                 //   steps {
                 //             withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
@@ -482,8 +482,8 @@ pipeline {
                 //                 }
                 //             }
                 //         }
-                //         }
                 // }
+            }
         }
 
         /*
