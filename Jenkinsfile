@@ -356,9 +356,11 @@ pipeline {
                                 """, returnStdout: true).trim()
                                 if (pfStarted?.contains('OK')) {
                                     useLocalPortForward = true
+                                    host = '127.0.0.1:8084'
                                     env.ARGOCD_SERVER = '127.0.0.1:8084'
+                                } else {
+                                    host = ARGOCD_SERVER.replaceAll('^https?://', '')
                                 }
-                                host = env.ARGOCD_SERVER.replaceAll('^https?://', '')
 
                                 sh """
                                     if [ ! -x /usr/local/bin/argocd ]; then
