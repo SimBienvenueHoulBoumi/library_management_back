@@ -79,7 +79,7 @@ pipeline {
             }
         }
 
-                // /**
+        // /**
         //  * Nettoyage du projet avant les tests
         //  * - Supprime le répertoire target pour éviter les conflits entre tests parallèles
         //  */
@@ -298,7 +298,6 @@ pipeline {
          * - Mise à jour des valeurs Helm et synchronisation
          * - Utilise le script scripts/deploy-argocd.sh si disponible
          */
-
         stage('🚀 GitOps – ArgoCD') {
             when {
                 allOf {
@@ -416,65 +415,63 @@ pipeline {
                         * - Utilise scripts/deploy-argocd.sh si disponible, sinon commandes inline
                         */
                         stage('🔄 ArgoCD Sync') {
-                    // steps {
-                    //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                    //             script {
-                    //                 def imageTag = env.BUILD_NUMBER
-                    //                 def deployScript = "scripts/deploy-argocd.sh"
+                    steps {
+                            withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                                script {
+                                    def imageTag = env.BUILD_NUMBER
+                                    def deployScript = "scripts/deploy-argocd.sh"
                                     
-                    //                 if (fileExists(deployScript)) {
-                    //                     sh """
-                    //                         chmod +x ${deployScript}
-                    //                         ${deployScript} \\
-                    //                             --server ${ARGOCD_SERVER} \\
-                    //                             --user admin \\
-                    //                             --password "\${ARGOCD_PASS}" \\
-                    //                             --app ${ARGOCD_APP} \\
-                    //                             --namespace ${ARGOCD_NS} \\
-                    //                             --repo ${K8S_IMAGE_REPO} \\
-                    //                             --tag ${imageTag} \\
-                    //                             --chart-path ${ARGOCD_CHART_PATH} \\
-                    //                             --git-repo-url ${GIT_REPO_URL} \\
-                    //                             --create-app ${ARGOCD_CREATE_APP}
-                    //                     """
-                    //                 } else {
-                    //                     def host = ARGOCD_SERVER.replaceAll('^https?://', '')
+                                    if (fileExists(deployScript)) {
+                                        sh """
+                                            chmod +x ${deployScript}
+                                            ${deployScript} \\
+                                                --server ${ARGOCD_SERVER} \\
+                                                --user admin \\
+                                                --password "\${ARGOCD_PASS}" \\
+                                                --app ${ARGOCD_APP} \\
+                                                --namespace ${ARGOCD_NS} \\
+                                                --repo ${K8S_IMAGE_REPO} \\
+                                                --tag ${imageTag} \\
+                                                --chart-path ${ARGOCD_CHART_PATH} \\
+                                                --git-repo-url ${GIT_REPO_URL} \\
+                                                --create-app ${ARGOCD_CREATE_APP}
+                                        """
+                                    } else {
+                                        def host = ARGOCD_SERVER.replaceAll('^https?://', '')
                                         
-                    //                     sh """
-                    //                         if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
-                    //                             /usr/local/bin/argocd login ${host} \\
-                    //                                 --username admin \\
-                    //                                 --password "\${ARGOCD_PASS}" \\
-                    //                                 --plaintext \\
-                    //                                 --grpc-web \\
-                    //                                 --insecure || exit 1
-                    //                         fi
+                                        sh """
+                                            if ! /usr/local/bin/argocd account get --grpc-web &>/dev/null; then
+                                                /usr/local/bin/argocd login ${host} \\
+                                                    --username admin \\
+                                                    --password "\${ARGOCD_PASS}" \\
+                                                    --plaintext \\
+                                                    --grpc-web \\
+                                                    --insecure || exit 1
+                                            fi
 
-                    //                         if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                    //                             exit 0
-                    //                         fi
+                                            if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                                                exit 0
+                                            fi
 
-                    //                         /usr/local/bin/argocd app set ${ARGOCD_APP} \\
-                    //                             --helm-set image.repository=${K8S_IMAGE_REPO} \\
-                    //                             --helm-set image.tag=${imageTag} \\
-                    //                             --grpc-web || true
+                                            /usr/local/bin/argocd app set ${ARGOCD_APP} \\
+                                                --helm-set image.repository=${K8S_IMAGE_REPO} \\
+                                                --helm-set image.tag=${imageTag} \\
+                                                --grpc-web || true
                                             
-                    //                         /usr/local/bin/argocd app sync ${ARGOCD_APP} \\
-                    //                             --grpc-web \\
-                    //                             --timeout 300 \\
-                    //                             --prune || exit 1
+                                            /usr/local/bin/argocd app sync ${ARGOCD_APP} \\
+                                                --grpc-web \\
+                                                --timeout 300 \\
+                                                --prune || exit 1
                                             
-                    //                         /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
-                    //                     """
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    //   }
-            }
-         }
+                                            /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
+                                        """
+                                    }
+                                }
+                            }
+                        }
+                      }
+                    }
         }
-    
 
         /*
         /**
@@ -485,7 +482,8 @@ pipeline {
                 sh 'docker image prune -f || true'
             }
         }
-      
+    
+    }
 
     post {
         always {
