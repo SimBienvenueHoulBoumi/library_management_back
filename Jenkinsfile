@@ -60,7 +60,7 @@ pipeline {
     }
 
     stages {
-
+        /*
         /**
          * Checkout du code source et détection de la version Maven
          * - Nettoie le workspace
@@ -291,6 +291,8 @@ pipeline {
             }
         }
 
+     */
+
         /**
          * Déploiement GitOps via ArgoCD
          * - Connexion à ArgoCD via host.docker.internal:8084 (port-forward)
@@ -473,6 +475,7 @@ pipeline {
             }
         }
 
+        /*
         /**
          * Nettoyage des images Docker non utilisées
          */
@@ -481,6 +484,7 @@ pipeline {
                 sh 'docker image prune -f || true'
             }
         }
+        */
     }
 
     post {
