@@ -335,6 +335,9 @@ pipeline {
                                     sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
                                     # Kind cert ne contient pas host.docker.internal → skip TLS verify pour le port-forward
                                     sed -i '/server: https:\\/\\/host.docker.internal/a\\    insecure-skip-tls-verify: true' /tmp/kubeconfig-pf 2>/dev/null || true
+                                    # kubectl n'accepte pas certificate-authority + insecure-skip-tls-verify → retirer le CA
+                                    sed -i '/certificate-authority-data:/d' /tmp/kubeconfig-pf 2>/dev/null || true
+                                    sed -i '/certificate-authority:/d' /tmp/kubeconfig-pf 2>/dev/null || true
                                     pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
                                     sleep 2
                                     (KUBECONFIG=/tmp/kubeconfig-pf nohup kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &)
