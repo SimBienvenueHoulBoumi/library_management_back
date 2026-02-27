@@ -57,6 +57,8 @@ pipeline {
         ARGOCD_CHART_PATH  = "kubernetes/charts/library-management"
         // Si ARGOCD_CREATE_APP=false, la création automatique est désactivée
         ARGOCD_CREATE_APP  = 'true'  // Activé maintenant que le chart Helm est créé
+        // Credential Jenkins (Secret file) contenant le kubeconfig pour le port-forward in-agent. Si vide, on utilise /home/jenkins/.kube/config (montage volume).
+        KUBECONFIG_CREDENTIALS_ID = ''
     }
 
     stages {
@@ -313,25 +315,39 @@ pipeline {
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
-                            script {
+                        script {
+                            def credList = [string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]
+                            if (KUBECONFIG_CREDENTIALS_ID?.trim()) {
+                                credList.add(file(credentialsId: KUBECONFIG_CREDENTIALS_ID.trim(), variable: 'KUBECONFIG_FILE'))
+                            }
+                            withCredentials(credList) {
+                                def kubeConfigPath = env.KUBECONFIG_FILE ?: '/home/jenkins/.kube/config'
                                 def host = ARGOCD_SERVER.replaceAll('^https?://', '')
                                 def useLocalPortForward = false
 
-                                // Démarrer le port-forward dans l'agent si kubectl et kubeconfig sont présents
-                                def pfStarted = sh(script: '''
+                                // Démarrer le port-forward dans l'agent si kubectl et kubeconfig sont présents (fichier monté ou credential Jenkins)
+                                def pfStarted = sh(script: """
                                     if ! command -v kubectl >/dev/null 2>&1; then exit 1; fi
-                                    if [ ! -f /home/jenkins/.kube/config ]; then exit 1; fi
-                                    cp /home/jenkins/.kube/config /tmp/kubeconfig-pf 2>/dev/null || exit 1
+                                    if [ ! -f '${kubeConfigPath}' ]; then exit 1; fi
+                                    cp '${kubeConfigPath}' /tmp/kubeconfig-pf 2>/dev/null || exit 1
                                     sed -i "s|https://127.0.0.1:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
                                     sed -i "s|https://kubernetes.docker.internal:|https://host.docker.internal:|g" /tmp/kubeconfig-pf 2>/dev/null || true
                                     pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
                                     sleep 2
-                                    KUBECONFIG=/tmp/kubeconfig-pf nohup kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &
-                                    disown 2>/dev/null || true
-                                    sleep 5
-                                    curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1 && echo "OK" || exit 1
-                                ''', returnStdout: true).trim()
+                                    (KUBECONFIG=/tmp/kubeconfig-pf nohup kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &)
+                                    sleep 3
+                                    ok=0
+                                    for i in \$(seq 1 15); do
+                                        if curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1; then ok=1; break; fi
+                                        sleep 2
+                                    done
+                                    if [ "\$ok" != "1" ]; then
+                                        echo "ArgoCD port-forward health check failed. Log:"
+                                        cat /tmp/argocd-pf.log 2>/dev/null || true
+                                        exit 1
+                                    fi
+                                    echo "OK"
+                                """, returnStdout: true).trim()
                                 if (pfStarted?.contains('OK')) {
                                     useLocalPortForward = true
                                     env.ARGOCD_SERVER = '127.0.0.1:8084'
