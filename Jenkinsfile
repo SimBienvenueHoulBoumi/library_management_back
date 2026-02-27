@@ -47,10 +47,10 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // ArgoCD est exposé via un NodePort stable sur le cluster (ex: 31080)
-        // IMPORTANT: Le service argocd-server doit être de type NodePort et exposer le port 80 sur 31080
-        // Exemple de patch: kubectl -n argocd patch svc argocd-server -p '{"spec": {"type": "NodePort","ports":[{"name":"http","port":80,"targetPort":8080,"nodePort":31080}]}}'
-        ARGOCD_SERVER      = 'host.docker.internal:31080'   // NodePort stable exposé par le cluster
+        // ArgoCD est accessible via port-forward sur l'hôte (port 8084)
+        // IMPORTANT: Le port-forward doit être actif avant d'exécuter le pipeline
+        // Démarrer avec: cd infra && ./main.sh argocd-port-forward 8084
+        ARGOCD_SERVER      = 'host.docker.internal:8084'   // Port-forward depuis l'hôte (doit être actif)
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -335,7 +335,7 @@ pipeline {
                                             sleep 1
                                         done
                                         if [ "\$ok" != "1" ]; then
-                                            echo "ArgoCD unreachable at ${host}. Vérifiez que le service argocd-server (NodePort) est correctement exposé."
+                                            echo "ArgoCD unreachable at ${host}. Start port-forward: cd infra && ./main.sh argocd-port-forward 8084"
                                             exit 1
                                         fi
                                     fi
