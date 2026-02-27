@@ -334,7 +334,7 @@ pipeline {
                                             fi
                                             sleep 1
                                         done
-                                        if [ "$ok" != "1" ]; then
+                                        if [ "\$ok" != "1" ]; then
                                             echo "ArgoCD unreachable at ${host}. Start port-forward: cd infra && ./main.sh argocd-port-forward 8084"
                                             exit 1
                                         fi
