@@ -342,8 +342,9 @@ pipeline {
                                         sed -i '/certificate-authority:/d' /tmp/kubeconfig-pf 2>/dev/null || true
                                         pkill -f "kubectl port-forward.*8084:80" 2>/dev/null || true
                                         sleep 2
-                                        (KUBECONFIG=/tmp/kubeconfig-pf kubectl port-forward -n argocd svc/argocd-server 8084:80 >/tmp/argocd-pf.log 2>&1 &)
-                                        sleep 3
+                                        nohup env KUBECONFIG=/tmp/kubeconfig-pf kubectl port-forward -n argocd svc/argocd-server 8084:80 >>/tmp/argocd-pf.log 2>&1 &
+                                        disown 2>/dev/null || true
+                                        sleep 5
                                         ok=0
                                         for i in \$(seq 1 15); do
                                             if curl -fsS --connect-timeout 3 http://127.0.0.1:8084/healthz >/dev/null 2>&1; then ok=1; break; fi
@@ -351,6 +352,7 @@ pipeline {
                                         done
                                         if [ "\$ok" = "1" ]; then
                                             ARGOCD_HOST="127.0.0.1:8084"
+                                            sleep 2
                                         fi
                                     fi
                                     if [ "\$ok" != "1" ]; then
