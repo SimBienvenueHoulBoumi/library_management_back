@@ -340,10 +340,17 @@ pipeline {
                                                 fi
                                             fi
                                             
+                                            # Forcer IPv4 pour argocd (évite "connection refused" si le client tente l'IPv6)
+                                            ARGOCD_IP=\$(getent hosts host.docker.internal 2>/dev/null | awk '\$1 !~ /:/ {print \$1; exit}')
+                                            if [ -z "\$ARGOCD_IP" ] && command -v ping >/dev/null 2>&1; then
+                                                ARGOCD_IP=\$(ping -4 -c 1 host.docker.internal 2>/dev/null | sed -n 's/.*(\\([0-9.]*\\)).*/\\1/p' | head -1)
+                                            fi
+                                            if [ -n "\$ARGOCD_IP" ]; then ARGOCD_LOGIN="\${ARGOCD_IP}:8084"; else ARGOCD_LOGIN="${host}"; fi
+                                            
                                             # Se connecter à ArgoCD (retries: le port-forward peut être instable)
                                             n=0
                                             until [ "\$n" -ge 5 ]; do
-                                                if /usr/local/bin/argocd login ${host} \\
+                                                if /usr/local/bin/argocd login "\$ARGOCD_LOGIN" \\
                                                     --username admin \\
                                                     --password "\${ARGOCD_PASS}" \\
                                                     --plaintext \\
@@ -354,7 +361,7 @@ pipeline {
                                                 n=\$((n+1))
                                                 sleep 3
                                             done
-                                            /usr/local/bin/argocd login ${host} \\
+                                            /usr/local/bin/argocd login "\$ARGOCD_LOGIN" \\
                                                 --username admin \\
                                                 --password "\${ARGOCD_PASS}" \\
                                                 --plaintext \\
