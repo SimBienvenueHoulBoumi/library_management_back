@@ -324,15 +324,15 @@ pipeline {
                                                 exit 1
                                             fi
 
-                                            # Vérifier que le serveur ArgoCD est joignable (port-forward actif)
+                                            # Attendre que le serveur ArgoCD soit joignable (port-forward actif, jusqu'à ~90s)
                                             if command -v curl >/dev/null 2>&1; then
                                                 ok=0
-                                                for i in 1 2 3 4 5 6 7 8 9 10; do
-                                                    if curl -fsS --connect-timeout 2 "http://${host}/healthz" >/dev/null 2>&1; then
+                                                for i in \$(seq 1 30); do
+                                                    if curl -fsS --connect-timeout 5 "http://${host}/healthz" >/dev/null 2>&1; then
                                                         ok=1
                                                         break
                                                     fi
-                                                    sleep 1
+                                                    sleep 2
                                                 done
                                                 if [ "\$ok" != "1" ]; then
                                                     echo "ArgoCD unreachable at ${host}. Start port-forward: cd infra && ./main.sh argocd-port-forward 8084"
