@@ -352,9 +352,11 @@ pipeline {
                                 fi
                                 echo "ArgoCD joignable sur \$PROTO://\$ARGOCD_HOST"
                                 sleep 3
+                                LOGIN_SERVER="\$ARGOCD_HOST"
+                                [ "\$PROTO" = "http" ] && LOGIN_SERVER="http://\$ARGOCD_HOST"
                                 login_ok=0
                                 for attempt in 1 2 3 4 5; do
-                                    if /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
+                                    if /usr/local/bin/argocd login "\$LOGIN_SERVER" \\
                                         --username admin \\
                                         --password "\${ARGOCD_TOKEN}" \\
                                         \$LOGIN_EXTRA \\
@@ -367,7 +369,8 @@ pipeline {
                                     sleep 3
                                 done
                                 if [ "\$login_ok" != "1" ]; then
-                                    echo "ArgoCD login échoué après 5 tentatives"
+                                    echo "ArgoCD login échoué après 5 tentatives. Erreur CLI :"
+                                    /usr/local/bin/argocd login "\$LOGIN_SERVER" --username admin --password "\${ARGOCD_TOKEN}" \$LOGIN_EXTRA --grpc-web --insecure || true
                                     exit 1
                                 fi
                                 echo "ArgoCD login OK (\$ARGOCD_HOST)"
