@@ -307,8 +307,9 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD (agent Docker → ArgoCD dans K8s via port-forward sur l'hôte).
-                 * Prérequis : sur l'hôte, ./main.sh argocd-port-forward 8084 (reste actif pendant le job).
+                 * Connexion à ArgoCD. Depuis l'agent Docker, argocd.localhost:443 est souvent injoignable
+                 * (Traefik en 127.0.0.1). On tente d'abord argocd.localhost, puis fallback host.docker.internal:8084.
+                 * Prérequis : port-forward sur l'hôte (./main.sh argocd-port-forward 8084) pour le fallback.
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
@@ -318,21 +319,38 @@ pipeline {
                                     echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                     exit 1
                                 fi
-                                ARGOCD_HOST='${env.ARGOCD_SERVER}'
-                                case "\$ARGOCD_HOST" in
-                                  *:8084) PROTO="http"; LOGIN_EXTRA="--plaintext" ;;
-                                  *)      PROTO="https"; LOGIN_EXTRA=""; ARGOCD_HOST="\$ARGOCD_HOST:443" ;;
-                                esac
                                 ok=0
-                                for i in \$(seq 1 30); do
-                                    if curl -fksS --connect-timeout 5 "\$PROTO://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                ARGOCD_HOST=''
+                                PROTO=''
+                                LOGIN_EXTRA=''
+                                for try_https in 1 0; do
+                                  if [ "\$try_https" = "1" ]; then
+                                    ARGOCD_HOST='argocd.localhost:443'
+                                    PROTO='https'
+                                    LOGIN_EXTRA=''
+                                    echo "Tentative https://argocd.localhost..."
+                                  else
+                                    ARGOCD_HOST='host.docker.internal:8084'
+                                    PROTO='http'
+                                    LOGIN_EXTRA='--plaintext'
+                                    echo "Fallback http://host.docker.internal:8084..."
+                                  fi
+                                  max=\$([ "\$try_https" = "1" ] && echo 5 || echo 20)
+                                  for i in \$(seq 1 \$max); do
+                                    if curl -fksS --connect-timeout 5 "\$PROTO://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then
+                                      ok=1
+                                      break
+                                    fi
                                     sleep 2
+                                  done
+                                  [ "\$ok" = "1" ] && break
                                 done
                                 if [ "\$ok" != "1" ]; then
-                                    echo "ArgoCD unreachable at \$PROTO://\$ARGOCD_HOST"
+                                    echo "ArgoCD unreachable (argocd.localhost et host.docker.internal:8084)"
                                     echo "Sur l'HÔTE : cd infra && ./main.sh argocd-port-forward 8084"
                                     exit 1
                                 fi
+                                echo "ArgoCD joignable sur \$PROTO://\$ARGOCD_HOST"
                                 sleep 3
                                 login_ok=0
                                 for attempt in 1 2 3 4 5; do
@@ -349,7 +367,7 @@ pipeline {
                                     sleep 3
                                 done
                                 if [ "\$login_ok" != "1" ]; then
-                                    echo "ArgoCD login échoué après 5 tentatives (connection refused = port-forward instable, relancer sur l'hôte)"
+                                    echo "ArgoCD login échoué après 5 tentatives"
                                     exit 1
                                 fi
                                 echo "ArgoCD login OK (\$ARGOCD_HOST)"
