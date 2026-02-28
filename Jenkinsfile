@@ -47,8 +47,8 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // Agent (Docker) → ArgoCD (K8s). host.docker.internal:8084 = port-forward HTTP sur l'hôte (fiable). argocd.localhost = HTTPS via Traefik (port-forward requis aussi).
-        ARGOCD_SERVER      = 'host.docker.internal:8084'
+        // Même URL que le test sur l'hôte (https://argocd.localhost). Prérequis : port-forward actif + extra_hosts argocd.localhost sur l'agent.
+        ARGOCD_SERVER      = 'argocd.localhost'
         ARGOCD_CRED        = 'ARGOCD_TOKEN'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
