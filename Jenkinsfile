@@ -47,7 +47,7 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // Agent Docker → host.docker.internal:8084 (port-forward HTTP sur l'hôte). Sur l'hôte : ./main.sh argocd-port-forward 8084
+        // Agent (Docker) → ArgoCD (K8s). host.docker.internal:8084 = port-forward HTTP sur l'hôte (fiable). argocd.localhost = HTTPS via Traefik (port-forward requis aussi).
         ARGOCD_SERVER      = 'host.docker.internal:8084'
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
@@ -307,9 +307,8 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD depuis l'agent Docker.
-                 * Utilise host.docker.internal:8084 (port-forward HTTP sur l'hôte).
-                 * Prérequis : sur l'hôte, lancer ./main.sh argocd-port-forward 8084
+                 * Connexion à ArgoCD (agent Docker → ArgoCD dans K8s via port-forward sur l'hôte).
+                 * Prérequis : sur l'hôte, ./main.sh argocd-port-forward 8084 (reste actif pendant le job).
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
@@ -320,21 +319,43 @@ pipeline {
                                     exit 1
                                 fi
                                 ARGOCD_HOST='${env.ARGOCD_SERVER}'
+                                if echo "\$ARGOCD_HOST" | grep -q ':8084'; then
+                                    PROTO="http"
+                                    LOGIN_EXTRA="--plaintext"
+                                else
+                                    PROTO="https"
+                                    LOGIN_EXTRA=""
+                                    ARGOCD_HOST="\$ARGOCD_HOST:443"
+                                fi
                                 ok=0
                                 for i in \$(seq 1 30); do
-                                    if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                    if curl -fksS --connect-timeout 5 "\$PROTO://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
                                     sleep 2
                                 done
                                 if [ "\$ok" != "1" ]; then
-                                    echo "ArgoCD unreachable at \$ARGOCD_HOST. Sur l'HÔTE : ./main.sh argocd-port-forward 8084"
+                                    echo "ArgoCD unreachable at \$PROTO://\$ARGOCD_HOST"
+                                    echo "Sur l'HÔTE : cd infra && ./main.sh argocd-port-forward 8084"
                                     exit 1
                                 fi
-                                /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
-                                    --username admin \\
-                                    --password "\${ARGOCD_PASS}" \\
-                                    --plaintext \\
-                                    --grpc-web \\
-                                    --insecure || exit 1
+                                sleep 3
+                                login_ok=0
+                                for attempt in 1 2 3 4 5; do
+                                    if /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
+                                        --username admin \\
+                                        --password "\${ARGOCD_PASS}" \\
+                                        \$LOGIN_EXTRA \\
+                                        --grpc-web \\
+                                        --insecure 2>/dev/null; then
+                                        login_ok=1
+                                        break
+                                    fi
+                                    echo "Tentative \$attempt/5 échouée, nouvel essai dans 3s..."
+                                    sleep 3
+                                done
+                                if [ "\$login_ok" != "1" ]; then
+                                    echo "ArgoCD login échoué après 5 tentatives (connection refused = port-forward instable, relancer sur l'hôte)"
+                                    exit 1
+                                fi
                                 echo "ArgoCD login OK (\$ARGOCD_HOST)"
                             """
                         }
