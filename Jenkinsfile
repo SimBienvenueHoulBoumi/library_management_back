@@ -49,7 +49,7 @@ pipeline {
         ARGOCD_ENABLED     = 'true'
         // Agent (Docker) → ArgoCD (K8s). host.docker.internal:8084 = port-forward HTTP sur l'hôte (fiable). argocd.localhost = HTTPS via Traefik (port-forward requis aussi).
         ARGOCD_SERVER      = 'host.docker.internal:8084'
-        ARGOCD_CRED        = 'ARGOCD_PASSWORD'
+        ARGOCD_CRED        = 'ARGOCD_TOKEN'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
         ARGOCD_CHART_PATH  = "kubernetes/charts/library-management"
@@ -312,7 +312,7 @@ pipeline {
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_PASS')]) {
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
                                 if [ ! -x /usr/local/bin/argocd ]; then
                                     echo "ArgoCD CLI not found at /usr/local/bin/argocd"
@@ -342,7 +342,7 @@ pipeline {
                                 for attempt in 1 2 3 4 5; do
                                     if /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
                                         --username admin \\
-                                        --password "\${ARGOCD_PASS}" \\
+                                        --password "\${ARGOCD_TOKEN}" \\
                                         \$LOGIN_EXTRA \\
                                         --grpc-web \\
                                         --insecure 2>/dev/null; then
