@@ -305,8 +305,7 @@ pipeline {
                 stage('ArgoCD – Détecter serveur') {
                     steps {
                         script {
-                            def host = ''
-                            def extra = ''
+                            // Même logique que l'autre (bloc ArgoCD d'origine) : 15 tentatives HTTPS, 10 HTTP, sleep 2
                             def ok = sh(
                                 script: '''
                                     for try_https in 1 0; do
@@ -314,12 +313,14 @@ pipeline {
                                         h="argocd.localhost:443"
                                         e=""
                                         p="https"
+                                        max=15
                                       else
                                         h="host.docker.internal:8084"
                                         e="--plaintext"
                                         p="http"
+                                        max=10
                                       fi
-                                      for i in $(seq 1 10); do
+                                      for i in $(seq 1 $max); do
                                         if curl -fksS --connect-timeout 5 "$p://$h/healthz" >/dev/null 2>&1; then
                                           echo "$h|$e"
                                           exit 0
@@ -332,7 +333,7 @@ pipeline {
                                 returnStdout: true
                             ).trim()
                             if (!ok) {
-                                error("ArgoCD unreachable. Recréer la stack : cd infra && docker compose up -d --force-recreate")
+                                error("ArgoCD unreachable. Recréer la stack : cd infra && docker compose up -d --force-recreate. Ou port-forward : kubectl port-forward -n argocd svc/argocd-server 8084:443")
                             }
                             def parts = ok.split('\\|', -1)
                             env.ARGOCD_HOST = parts[0] ?: ''
@@ -347,12 +348,29 @@ pipeline {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
                                 set -e
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" \\
-                                    --username admin \\
-                                    --password "\${ARGOCD_TOKEN}" \\
-                                    \${ARGOCD_LOGIN_EXTRA} \\
-                                    --grpc-web \\
-                                    --insecure
+                                sleep 3
+                                login_ok=0
+                                for attempt in 1 2 3 4 5; do
+                                    if /usr/local/bin/argocd login "\${ARGOCD_HOST}" \\
+                                        --username admin \\
+                                        --password "\${ARGOCD_TOKEN}" \\
+                                        \${ARGOCD_LOGIN_EXTRA} \\
+                                        --grpc-web \\
+                                        --insecure 2>/dev/null; then
+                                        login_ok=1
+                                        break
+                                    fi
+                                    echo "Tentative \$attempt/5 échouée, nouvel essai dans 3s..."
+                                    sleep 3
+                                done
+                                if [ "\$login_ok" != "1" ]; then
+                                    echo "ArgoCD login échoué après 5 tentatives. Erreur CLI :"
+                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure || true
+                                    if echo "\${ARGOCD_HOST}" | grep -q 8084; then
+                                        echo ">>> Connexion refusée sur 8084 : cd infra && docker compose up -d --force-recreate (argocd.localhost)"
+                                    fi
+                                    exit 1
+                                fi
                             """
                         }
                         echo "Login ArgoCD OK"
