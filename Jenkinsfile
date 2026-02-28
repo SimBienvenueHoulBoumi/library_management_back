@@ -47,7 +47,7 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // Même URL que le test sur l'hôte (https://argocd.localhost). Prérequis : port-forward actif + extra_hosts argocd.localhost sur l'agent.
+        // UI : https://argocd.localhost/applications — Pipeline tente d'abord cette URL, puis fallback host.docker.internal:8084.
         ARGOCD_SERVER      = 'argocd.localhost'
         ARGOCD_CRED        = 'ARGOCD_TOKEN'
         ARGOCD_APP         = "${PROJECT_NAME}"
@@ -307,8 +307,8 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD. Depuis l'agent Docker, argocd.localhost:443 est souvent injoignable
-                 * (Traefik en 127.0.0.1). On tente d'abord argocd.localhost, puis fallback host.docker.internal:8084.
+                 * Connexion à ArgoCD. URL UI : https://argocd.localhost/applications
+                 * Depuis l'agent Docker, argocd.localhost:443 est souvent injoignable ; fallback host.docker.internal:8084.
                  * Prérequis : port-forward sur l'hôte (./main.sh argocd-port-forward 8084) pour le fallback.
                  */
                 stage('🔐 ArgoCD Login') {
@@ -352,11 +352,9 @@ pipeline {
                                 fi
                                 echo "ArgoCD joignable sur \$PROTO://\$ARGOCD_HOST"
                                 sleep 3
-                                LOGIN_SERVER="\$ARGOCD_HOST"
-                                [ "\$PROTO" = "http" ] && LOGIN_SERVER="http://\$ARGOCD_HOST"
                                 login_ok=0
                                 for attempt in 1 2 3 4 5; do
-                                    if /usr/local/bin/argocd login "\$LOGIN_SERVER" \\
+                                    if /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
                                         --username admin \\
                                         --password "\${ARGOCD_TOKEN}" \\
                                         \$LOGIN_EXTRA \\
@@ -370,7 +368,7 @@ pipeline {
                                 done
                                 if [ "\$login_ok" != "1" ]; then
                                     echo "ArgoCD login échoué après 5 tentatives. Erreur CLI :"
-                                    /usr/local/bin/argocd login "\$LOGIN_SERVER" --username admin --password "\${ARGOCD_TOKEN}" \$LOGIN_EXTRA --grpc-web --insecure || true
+                                    /usr/local/bin/argocd login "\$ARGOCD_HOST" --username admin --password "\${ARGOCD_TOKEN}" \$LOGIN_EXTRA --grpc-web --insecure || true
                                     exit 1
                                 fi
                                 echo "ArgoCD login OK (\$ARGOCD_HOST)"
