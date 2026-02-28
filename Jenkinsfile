@@ -47,8 +47,8 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // ArgoCD dans Kubernetes : NodePort 30080 (Kind expose sur l'hôte). Agent Docker → host.docker.internal:30080 (pas de port-forward)
-        ARGOCD_SERVER      = 'host.docker.internal:30080'
+        // Même URL que l'UI : https://argocd.localhost (Traefik). Port-forward sur l'hôte requis : ./main.sh argocd-port-forward 8084
+        ARGOCD_SERVER      = 'argocd.localhost'
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -307,8 +307,9 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD (Jenkins dans Docker → ArgoCD dans K8s via NodePort 30080 sur l'hôte)
-                 * Pas de port-forward dans l'agent : on utilise host.docker.internal:30080 (NodePort exposé par Kind).
+                 * Connexion à ArgoCD (HTTPS via https://argocd.localhost, comme l'UI).
+                 * Prérequis : port-forward sur l'hôte (./main.sh argocd-port-forward 8084).
+                 * Pas de --plaintext pour rester en HTTPS ; --insecure pour le certificat Traefik.
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
@@ -321,19 +322,19 @@ pipeline {
                                 ARGOCD_HOST='${env.ARGOCD_SERVER}'
                                 ok=0
                                 for i in \$(seq 1 30); do
-                                    if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                    if curl -fkS --connect-timeout 5 "https://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
                                     sleep 2
                                 done
                                 if [ "\$ok" != "1" ]; then
-                                    echo "ArgoCD unreachable at \$ARGOCD_HOST. Vérifier que le cluster Kind et ArgoCD (NodePort 30080) sont actifs."
+                                    echo "ArgoCD unreachable at https://\$ARGOCD_HOST. Sur l'HÔTE : ./main.sh argocd-port-forward 8084"
                                     exit 1
                                 fi
-                                /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
+                                /usr/local/bin/argocd login "\$ARGOCD_HOST:443" \\
                                     --username admin \\
                                     --password "\${ARGOCD_PASS}" \\
-                                    --plaintext \\
                                     --grpc-web \\
                                     --insecure || exit 1
+                                echo "ArgoCD login OK (https://\$ARGOCD_HOST)"
                             """
                         }
                     }
