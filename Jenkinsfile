@@ -292,9 +292,10 @@ pipeline {
 
 
         /**
-         * Déploiement GitOps via ArgoCD – un mini-stage par action pour suivre le déploiement.
+         * Déploiement de l'application conteneurisée via ArgoCD :
+         * image déjà buildée et poussée (Build & Push) → ArgoCD met à jour l'app et sync → déploiement sur le cluster.
          */
-        stage('🚀 GitOps – ArgoCD') {
+        stage('🚀 Déploiement – ArgoCD') {
             when {
                 allOf {
                     expression { ARGOCD_ENABLED == 'true' }
@@ -420,6 +421,18 @@ pipeline {
                             """
                         }
                         echo "Sync ${ARGOCD_APP} terminé"
+                    }
+                }
+
+                stage('ArgoCD – Attendre déploiement') {
+                    steps {
+                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                            sh """
+                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                /usr/local/bin/argocd app wait ${ARGOCD_APP} --grpc-web --timeout 300 --health
+                            """
+                        }
+                        echo "Application conteneurisée déployée et healthy"
                     }
                 }
 
