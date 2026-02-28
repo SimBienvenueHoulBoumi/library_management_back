@@ -319,6 +319,8 @@ pipeline {
                                     echo "ArgoCD CLI not found at /usr/local/bin/argocd"
                                     exit 1
                                 fi
+                                echo "Résolution argocd.localhost (doit pointer vers Traefik) :"
+                                getent hosts argocd.localhost 2>/dev/null || true
                                 ok=0
                                 ARGOCD_HOST=''
                                 PROTO=''
@@ -328,14 +330,14 @@ pipeline {
                                     ARGOCD_HOST='argocd.localhost:443'
                                     PROTO='https'
                                     LOGIN_EXTRA=''
-                                    echo "Tentative https://argocd.localhost..."
+                                    echo "Tentative https://argocd.localhost (comme l'UI)..."
                                   else
                                     ARGOCD_HOST='host.docker.internal:8084'
                                     PROTO='http'
                                     LOGIN_EXTRA='--plaintext'
-                                    echo "Fallback http://host.docker.internal:8084..."
+                                    echo "Fallback http://host.docker.internal:8084 (si argocd.localhost injoignable, recréer la stack : cd infra && docker compose up -d --force-recreate)"
                                   fi
-                                  max=\$([ "\$try_https" = "1" ] && echo 5 || echo 20)
+                                  max=\$([ "\$try_https" = "1" ] && echo 15 || echo 10)
                                   for i in \$(seq 1 \$max); do
                                     if curl -fksS --connect-timeout 5 "\$PROTO://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then
                                       ok=1
@@ -347,7 +349,8 @@ pipeline {
                                 done
                                 if [ "\$ok" != "1" ]; then
                                     echo "ArgoCD unreachable (argocd.localhost et host.docker.internal:8084)"
-                                    echo "Sur l'HÔTE : cd infra && ./main.sh argocd-port-forward 8084"
+                                    echo "Pour https://argocd.localhost depuis l'agent : cd infra && docker compose up -d --force-recreate"
+                                    echo "Port-forward requis : ./main.sh argocd-port-forward 8084"
                                     exit 1
                                 fi
                                 echo "ArgoCD joignable sur \$PROTO://\$ARGOCD_HOST"
