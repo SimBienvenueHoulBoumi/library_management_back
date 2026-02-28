@@ -47,8 +47,8 @@ pipeline {
 
         // ─── GitOps (ArgoCD) ────────────────────────────────────────────
         ARGOCD_ENABLED     = 'true'
-        // Même URL que l'UI : https://argocd.localhost (Traefik). Port-forward sur l'hôte requis : ./main.sh argocd-port-forward 8084
-        ARGOCD_SERVER      = 'argocd.localhost'
+        // Agent Docker → host.docker.internal:8084 (port-forward HTTP sur l'hôte). Sur l'hôte : ./main.sh argocd-port-forward 8084
+        ARGOCD_SERVER      = 'host.docker.internal:8084'
         ARGOCD_CRED        = 'ARGOCD_PASSWORD'
         ARGOCD_APP         = "${PROJECT_NAME}"
         ARGOCD_NS          = 'default'
@@ -307,9 +307,9 @@ pipeline {
             }
             stages {
                 /**
-                 * Connexion à ArgoCD (HTTPS via https://argocd.localhost, comme l'UI).
-                 * Prérequis : port-forward sur l'hôte (./main.sh argocd-port-forward 8084).
-                 * Pas de --plaintext pour rester en HTTPS ; --insecure pour le certificat Traefik.
+                 * Connexion à ArgoCD depuis l'agent Docker.
+                 * Utilise host.docker.internal:8084 (port-forward HTTP sur l'hôte).
+                 * Prérequis : sur l'hôte, lancer ./main.sh argocd-port-forward 8084
                  */
                 stage('🔐 ArgoCD Login') {
                     steps {
@@ -322,19 +322,20 @@ pipeline {
                                 ARGOCD_HOST='${env.ARGOCD_SERVER}'
                                 ok=0
                                 for i in \$(seq 1 30); do
-                                    if curl -fkS --connect-timeout 5 "https://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
+                                    if curl -fsS --connect-timeout 5 "http://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
                                     sleep 2
                                 done
                                 if [ "\$ok" != "1" ]; then
-                                    echo "ArgoCD unreachable at https://\$ARGOCD_HOST. Sur l'HÔTE : ./main.sh argocd-port-forward 8084"
+                                    echo "ArgoCD unreachable at \$ARGOCD_HOST. Sur l'HÔTE : ./main.sh argocd-port-forward 8084"
                                     exit 1
                                 fi
-                                /usr/local/bin/argocd login "\$ARGOCD_HOST:443" \\
+                                /usr/local/bin/argocd login "\$ARGOCD_HOST" \\
                                     --username admin \\
                                     --password "\${ARGOCD_PASS}" \\
+                                    --plaintext \\
                                     --grpc-web \\
                                     --insecure || exit 1
-                                echo "ArgoCD login OK (https://\$ARGOCD_HOST)"
+                                echo "ArgoCD login OK (\$ARGOCD_HOST)"
                             """
                         }
                     }
