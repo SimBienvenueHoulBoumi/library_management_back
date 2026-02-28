@@ -319,14 +319,10 @@ pipeline {
                                     exit 1
                                 fi
                                 ARGOCD_HOST='${env.ARGOCD_SERVER}'
-                                if echo "\$ARGOCD_HOST" | grep -q ':8084'; then
-                                    PROTO="http"
-                                    LOGIN_EXTRA="--plaintext"
-                                else
-                                    PROTO="https"
-                                    LOGIN_EXTRA=""
-                                    ARGOCD_HOST="\$ARGOCD_HOST:443"
-                                fi
+                                case "\$ARGOCD_HOST" in
+                                  *:8084) PROTO="http"; LOGIN_EXTRA="--plaintext" ;;
+                                  *)      PROTO="https"; LOGIN_EXTRA=""; ARGOCD_HOST="\$ARGOCD_HOST:443" ;;
+                                esac
                                 ok=0
                                 for i in \$(seq 1 30); do
                                     if curl -fksS --connect-timeout 5 "\$PROTO://\$ARGOCD_HOST/healthz" >/dev/null 2>&1; then ok=1; break; fi
