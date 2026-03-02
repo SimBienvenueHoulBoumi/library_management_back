@@ -11,9 +11,11 @@ spec:
   project: default
   source:
     repoURL: https://github.com/SimBienvenueHoulBoumi/library_management_back.git
+    # Chart Helm : dossier charts/library-management dans le repo
     path: kubernetes/charts/library-management
     targetRevision: HEAD
     helm:
+      releaseName: library-management
       valueFiles: []
       values: |
         image:
@@ -29,3 +31,9 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

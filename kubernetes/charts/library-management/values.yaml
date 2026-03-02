@@ -7,7 +7,7 @@ image:
   # IMPORTANT: Pour kind/k3d, remplacez host.docker.internal par l'IP de votre machine hôte
   # Obtenir l'IP: ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1
   # Exemple: repository: 192.168.1.100:8083/simdev/library-management
-  repository: 172.20.10.2:8083/simdev/library-management
+  repository: 172.20.10.1:8083/simdev/library-management
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   # Le tag sera mis à jour automatiquement par ArgoCD via le pipeline Jenkins
