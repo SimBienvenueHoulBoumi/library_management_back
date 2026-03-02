@@ -44,19 +44,6 @@ pipeline {
         // false = le build continue même si le quality gate échoue (warning seulement)
         FAIL_ON_SONAR      = 'true'
         FAIL_ON_TRIVY      = 'false'
-
-        // ─── GitOps (ArgoCD) ────────────────────────────────────────────
-        ARGOCD_ENABLED     = 'true'
-        // UI : https://argocd.localhost/applications — Pipeline tente d'abord cette URL, puis fallback host.docker.internal:8084.
-        ARGOCD_SERVER      = 'argocd.localhost'
-        ARGOCD_CRED        = 'ARGOCD_TOKEN'
-        ARGOCD_APP         = "${PROJECT_NAME}"
-        ARGOCD_NS          = 'default'
-        ARGOCD_CHART_PATH  = "kubernetes/charts/library-management"
-        // Si ARGOCD_CREATE_APP=false, la création automatique est désactivée
-        ARGOCD_CREATE_APP  = 'true'  // Activé maintenant que le chart Helm est créé
-        // Credential Jenkins (Secret file) contenant le kubeconfig pour le port-forward in-agent. Si vide, on utilise /home/jenkins/.kube/config (montage volume).
-        KUBECONFIG_CREDENTIALS_ID = ''
     }
 
     stages {
@@ -83,11 +70,11 @@ pipeline {
          * Nettoyage du projet avant les tests
          * - Supprime le répertoire target pour éviter les conflits entre tests parallèles
          */
-        // stage('🧹 Clean') {
-        //     steps {
-        //         sh './mvnw clean || rm -rf target || true'
-        //     }
-        // }
+        stage('🧹 Clean') {
+            steps {
+                sh './mvnw clean || rm -rf target || true'
+            }
+        }
 
         /**
          * Exécution des tests en parallèle
@@ -95,69 +82,69 @@ pipeline {
          * - Integration Tests: Tests d'intégration via Failsafe (inclut uniquement services/integration et services/unit)
          * Les rapports JUnit sont archivés automatiquement
          */
-        // stage('🧪 Tests') {
-        //     parallel {
-        //         stage('Unit Tests') {
-        //             steps {
-        //                 sh './mvnw test -DskipITs=true -DskipUnitTests=false'
-        //     }
-        //     post {
-        //         always {
-        //                     script {
-        //                         def reportsExist = sh(
-        //                             script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true',
-        //                             returnStdout: true
-        //                         ).trim()
+        stage('🧪 Tests') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        sh './mvnw test -DskipITs=true -DskipUnitTests=false'
+            }
+            post {
+                always {
+                            script {
+                                def reportsExist = sh(
+                                    script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true',
+                                    returnStdout: true
+                                ).trim()
                                 
-        //                         if (reportsExist) {
-        //                             junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-        //                         } else {
-        //                             sh '''
-        //                                 mkdir -p target/surefire-reports
-        //                                 cat > target/surefire-reports/TEST-empty.xml << 'EOF'
-        //                                 <?xml version="1.0" encoding="UTF-8"?>
-        //                                 <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
-        //                                 </testsuite>
-        //                                 EOF
-        //                             '''
-        //                             junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //         }
+                                if (reportsExist) {
+                                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                } else {
+                                    sh '''
+                                        mkdir -p target/surefire-reports
+                                        cat > target/surefire-reports/TEST-empty.xml << 'EOF'
+                                        <?xml version="1.0" encoding="UTF-8"?>
+                                        <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
+                                        </testsuite>
+                                        EOF
+                                    '''
+                                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                }
+                            }
+                        }
+                    }
+                }
 
-        //         stage('Integration Tests') {
-        //     steps {
-        //                 sh './mvnw compile verify -DskipITs=false -DskipUnitTests=true'
-        //     }
-        //     post {
-        //         always {
-        //                     script {
-        //                         def reportsExist = sh(
-        //                             script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true',
-        //                             returnStdout: true
-        //                         ).trim()
+                stage('Integration Tests') {
+            steps {
+                        sh './mvnw compile verify -DskipITs=false -DskipUnitTests=true'
+            }
+            post {
+                always {
+                            script {
+                                def reportsExist = sh(
+                                    script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true',
+                                    returnStdout: true
+                                ).trim()
                                 
-        //                         if (reportsExist) {
-        //                             junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-        //                         } else {
-        //                             sh '''
-        //                                 mkdir -p target/failsafe-reports
-        //                                 cat > target/failsafe-reports/TEST-empty.xml << 'EOF'
-        //                                 <?xml version="1.0" encoding="UTF-8"?>
-        //                                 <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
-        //                                 </testsuite>
-        //                                 EOF
-        //                             '''
-        //                             junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+                                if (reportsExist) {
+                                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                } else {
+                                    sh '''
+                                        mkdir -p target/failsafe-reports
+                                        cat > target/failsafe-reports/TEST-empty.xml << 'EOF'
+                                        <?xml version="1.0" encoding="UTF-8"?>
+                                        <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
+                                        </testsuite>
+                                        EOF
+                                    '''
+                                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         /**
          * Analyse de qualité du code avec SonarQube
@@ -165,76 +152,76 @@ pipeline {
          * - Attend le quality gate (sonar.qualitygate.wait=true)
          * - FAIL_ON_SONAR contrôle si le build échoue en cas d'échec du quality gate
          */
-        // stage('📊 Quality – SonarQube') {
-        //     when {
-        //         anyOf {
-        //             branch 'main'
-        //             branch pattern: 'release/.*', comparator: 'REGEXP'
-        //             branch pattern: 'hotfix/.*', comparator: 'REGEXP'
-        //             changeRequest()
-        //         }
-        //     }
-        //     steps {
-        //         withCredentials([string(credentialsId: SONAR_CRED, variable: 'TOKEN')]) {
-        //             script {
-        //                 def qualityGateWait = 'true'
-        //                 def shouldFail = FAIL_ON_SONAR == 'true'
+        stage('📊 Quality – SonarQube') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch pattern: 'release/.*', comparator: 'REGEXP'
+                    branch pattern: 'hotfix/.*', comparator: 'REGEXP'
+                    changeRequest()
+                }
+            }
+            steps {
+                withCredentials([string(credentialsId: SONAR_CRED, variable: 'TOKEN')]) {
+                    script {
+                        def qualityGateWait = 'true'
+                        def shouldFail = FAIL_ON_SONAR == 'true'
                         
-        //                 sh """
-        //                 ./mvnw sonar:sonar \
-        //                         -Dsonar.host.url=${SONAR_URL} \
-        //                         -Dsonar.token=${TOKEN} \
-        //                         -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-        //                         -Dsonar.projectVersion=${env.PROJECT_VERSION} \
-        //                         -Dsonar.qualitygate.wait=${qualityGateWait} \
-        //                         -DskipTests || {
-        //                             if [ "${shouldFail}" = "true" ]; then
-        //                                 exit 1
-        //                             else
-        //                                 exit 0
-        //                             fi
-        //                         }
-        //                 """
-        //             }
-        //         }
-        //     }
-        // }
+                        sh """
+                        ./mvnw sonar:sonar \
+                                -Dsonar.host.url=${SONAR_URL} \
+                                -Dsonar.token=${TOKEN} \
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                -Dsonar.projectVersion=${env.PROJECT_VERSION} \
+                                -Dsonar.qualitygate.wait=${qualityGateWait} \
+                                -DskipTests || {
+                                    if [ "${shouldFail}" = "true" ]; then
+                                        exit 1
+                                    else
+                                        exit 0
+                                    fi
+                                }
+                        """
+                    }
+                }
+            }
+        }
 
         /**
          * Construction et tag des images Docker
          * - Construit l'image avec plusieurs tags: BUILD_NUMBER, commit SHA, version
          * - Exécuté uniquement sur main, release/* et hotfix/*
          */
-        // stage('🐳 Build & Tag Docker Image') {
-        //     when { expression { shouldBuildAndPush() } }
-        //     steps {
-        //         script {
-        //             def commitShort = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        stage('🐳 Build & Tag Docker Image') {
+            when { expression { shouldBuildAndPush() } }
+            steps {
+                script {
+                    def commitShort = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
 
-        //             def imageTags = [
-        //                 BUILD_NUMBER.toString(),
-        //                 commitShort
-        //             ]
+                    def imageTags = [
+                        BUILD_NUMBER.toString(),
+                        commitShort
+                    ]
                     
-        //             // Ajouter la version seulement si elle n'est pas vide ou null
-        //             if (env.PROJECT_VERSION && env.PROJECT_VERSION != 'null' && env.PROJECT_VERSION.trim() != '') {
-        //                 imageTags.add(env.PROJECT_VERSION)
-        //             }
+                    // Ajouter la version seulement si elle n'est pas vide ou null
+                    if (env.PROJECT_VERSION && env.PROJECT_VERSION != 'null' && env.PROJECT_VERSION.trim() != '') {
+                        imageTags.add(env.PROJECT_VERSION)
+                    }
 
-        //             def fullImages = imageTags.collect { tag ->
-        //                 "${IMAGE_REPO}:${tag}"
-        //             }
+                    def fullImages = imageTags.collect { tag ->
+                        "${IMAGE_REPO}:${tag}"
+                    }
                     
-        //             env.FULL_IMAGES = fullImages.join(',')
+                    env.FULL_IMAGES = fullImages.join(',')
 
-        //             def tags = fullImages.join(' -t ')
-        //             sh """
-        //                 export DOCKER_BUILDKIT=0
-        //                 docker build -t ${tags} .
-        //             """
-        //         }
-        //     }
-        // }
+                    def tags = fullImages.join(' -t ')
+                    sh """
+                        export DOCKER_BUILDKIT=0
+                        docker build -t ${tags} .
+                    """
+                }
+            }
+        }
 
         /**
          * Scan de sécurité des images Docker avec Trivy
@@ -242,199 +229,54 @@ pipeline {
          * - Timeout de 15 minutes pour les grandes images Spring Boot
          * - FAIL_ON_TRIVY contrôle si le build échoue en cas de vulnérabilités
          */
-        // stage('🔐 Security Scans – Trivy') {
-        //     when { expression { shouldBuildAndPush() } }
-        //     steps {
-        //         sh """
-        //             mkdir -p reports/trivy
-        //             trivy image --format json --output reports/trivy/trivy.json \
-        //                 --severity CRITICAL,HIGH \
-        //                 --timeout 15m \
-        //                 --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
-        //                 ${IMAGE_REPO}:${BUILD_NUMBER} || {
-        //                 EXIT_CODE=\$?
-        //                 if [ "\${EXIT_CODE}" = "1" ] && [ "${FAIL_ON_TRIVY}" = "true" ]; then
-        //                     exit 1
-        //                 elif [ "\${EXIT_CODE}" = "124" ] || [ "\${EXIT_CODE}" = "1" ]; then
-        //                     if [ "${FAIL_ON_TRIVY}" = "true" ]; then
-        //                         exit 1
-        //                     else
-        //                         exit 0
-        //                     fi
-        //                 else
-        //                   exit 0
-        //                 fi
-        //             }
-        //         """
-        //     }
-        //     post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
-        // }
+        stage('🔐 Security Scans – Trivy') {
+            when { expression { shouldBuildAndPush() } }
+            steps {
+                sh """
+                    mkdir -p reports/trivy
+                    trivy image --format json --output reports/trivy/trivy.json \
+                        --severity CRITICAL,HIGH \
+                        --timeout 15m \
+                        --exit-code ${FAIL_ON_TRIVY == 'true' ? '1' : '0'} \
+                        ${IMAGE_REPO}:${BUILD_NUMBER} || {
+                        EXIT_CODE=\$?
+                        if [ "\${EXIT_CODE}" = "1" ] && [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                            exit 1
+                        elif [ "\${EXIT_CODE}" = "124" ] || [ "\${EXIT_CODE}" = "1" ]; then
+                            if [ "${FAIL_ON_TRIVY}" = "true" ]; then
+                                exit 1
+                            else
+                                exit 0
+                            fi
+                        else
+                          exit 0
+                        fi
+                    }
+                """
+            }
+            post { always { archiveArtifacts artifacts: 'reports/trivy/**', allowEmptyArchive: true } }
+        }
 
         /**
          * Push des images Docker vers Nexus Registry
          * - Connexion au registry HTTP (localhost:8083)
          * - Push de toutes les images taggées (BUILD_NUMBER, commit SHA, version)
          */
-        // stage('📦 Push Images') {
-        //     when { expression { shouldBuildAndPush() } }
-        //     steps {
-        //         withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-        //             sh """
-        //                 echo "\${PASS}" | docker login http://${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || exit 1
+        stage('📦 Push Images') {
+            when { expression { shouldBuildAndPush() } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh """
+                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || exit 1
 
-        //                 ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
+                        ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
-        //                 docker logout ${NEXUS_REGISTRY}
-        //             """
-        //         }
-        //     }
-        // }
-
-        /**
-         * Déploiement de l'application conteneurisée via ArgoCD :
-         * image déjà buildée et poussée (Build & Push) → ArgoCD met à jour l'app et sync → déploiement sur le cluster.
-         */
-        stage('🚀 Déploiement – ArgoCD') {
-            when {
-                allOf {
-                    expression { ARGOCD_ENABLED == 'true' }
-                    expression { shouldBuildAndPush() }
-                }
-            }
-            stages {
-                stage('ArgoCD – Détecter serveur') {
-                    steps {
-                        script {
-                            env.ARGOCD_HOST = 'argocd.localhost:443'
-                            def ok = sh(
-                                script: '''
-                                    max=30
-                                    to=10
-                                    for i in $(seq 1 $max); do
-                                      resp=$(curl -ksS --connect-timeout $to -H "Host: argocd.localhost" https://host.docker.internal:443/healthz 2>/dev/null) || true
-                                      if [ "$resp" = "ok" ]; then
-                                        echo "argocd.localhost:443"
-                                        exit 0
-                                      fi
-                                      sleep 2
-                                    done
-                                    exit 1
-                                ''',
-                                returnStdout: true
-                            ).trim()
-                            if (!ok) {
-                                error("""ArgoCD unreachable : /healthz n'a pas retourné 'ok'. Port-forward requis sur l'hôte :
-                                    cd infra && ./main.sh argocd-port-forward 8084
-                                    Garder ce terminal ouvert pendant tout le job Jenkins.""")
-                            }
-                        }
-                        echo "Serveur ArgoCD prêt : ${env.ARGOCD_HOST}"
-                    }
-                }
-
-                stage('ArgoCD – Login') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                set -e
-                                sleep 3
-                                login_ok=0
-                                for attempt in 1 2 3 4 5; do
-                                    if /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" \\
-                                        --username admin \\
-                                        --password "\${ARGOCD_TOKEN}" \\
-                                        --grpc-web \\
-                                        --insecure 2>/dev/null; then
-                                        login_ok=1
-                                        break
-                                    fi
-                                    echo "Tentative \$attempt/5 échouée, nouvel essai dans 3s..."
-                                    sleep 3
-                                done
-                                if [ "\$login_ok" != "1" ]; then
-                                    echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
-                                    /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>&1 || true
-                                    echo ""; echo ">>> Vérifier le port-forward sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084 (garder le terminal ouvert)"
-                                    exit 1
-                                fi
-                            """
-                        }
-                        echo "Login ArgoCD OK"
-                    }
-                }
-
-                stage('ArgoCD – Vérifier app') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
-                                if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                                    echo "Application ${ARGOCD_APP} non trouvée. La créer via Ansible (playbook gitops)."
-                                    exit 1
-                                fi
-                                echo "Application ${ARGOCD_APP} trouvée."
-                            """
-                        }
-                    }
-                }
-
-                stage('ArgoCD – Set image') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            script {
-                                def imageTag = env.BUILD_NUMBER ?: 'latest'
-                                def repo = env.K8S_IMAGE_REPO
-                                sh """
-                                    /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
-                                    /usr/local/bin/argocd app set ${ARGOCD_APP} \\
-                                        --helm-set "image.repository=${repo}" \\
-                                        --helm-set "image.tag=${imageTag}" \\
-                                        --grpc-web
-                                """
-                            }
-                        }
-                        echo "Image ${env.K8S_IMAGE_REPO}:${env.BUILD_NUMBER ?: 'latest'} définie"
-                    }
-                }
-
-                stage('ArgoCD – Sync') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
-                                /usr/local/bin/argocd app sync ${ARGOCD_APP} --grpc-web --timeout 300 --prune --force
-                            """
-                        }
-                        echo "Sync ${ARGOCD_APP} terminé"
-                    }
-                }
-
-                stage('ArgoCD – Attendre déploiement') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
-                                /usr/local/bin/argocd app wait ${ARGOCD_APP} --grpc-web --timeout 300 --health
-                            """
-                        }
-                        echo "Application conteneurisée déployée et healthy"
-                    }
-                }
-
-                stage('ArgoCD – Statut') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login host.docker.internal:443 -H "Host: argocd.localhost" --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
-                                /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Sync:|Health:|Status:" || true
-                            """
-                        }
-                    }
+                        docker logout ${NEXUS_REGISTRY}
+                    """
                 }
             }
         }
 
-        /*
         /**
          * Nettoyage des images Docker non utilisées
          */

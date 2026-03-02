@@ -1,0 +1,30 @@
+# Application ArgoCD – à appliquer avec: kubectl apply -f kubernetes/argocd-application.yaml -n argocd
+# Ou à créer via l’UI ArgoCD (New App → Edit as YAML).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: library-management
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SimBienvenueHoulBoumi/library_management_back.git
+    path: kubernetes/charts/library-management
+    targetRevision: HEAD
+    helm:
+      valueFiles: []
+      values: |
+        image:
+          repository: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
+          tag: latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
