@@ -32,7 +32,8 @@ pipeline {
         // OBLIGATOIRE: Dans Jenkins → Manage Jenkins → Credentials, créer une credential
         // de type "Username with password" (pas "Secret text") avec ID = NEXUS_CREDENTIALS,
         // username = admin Nexus, password = mot de passe admin (./main.sh nexus-password).
-        NEXUS_REGISTRY_HOST = 'nexus:8082'
+        // host.docker.internal:8083 car le daemon Docker est sur l'hôte (socket monté) ; le hostname "nexus" n'est pas résolu par le daemon.
+        NEXUS_REGISTRY_HOST = 'host.docker.internal:8083'
         NEXUS_REGISTRY      = "${NEXUS_REGISTRY_HOST}/repository/docker-hosted"
         REGISTRY_CRED       = 'NEXUS_CREDENTIALS'
         IMAGE_REPO          = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
