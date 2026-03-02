@@ -311,7 +311,7 @@ pipeline {
                                     max=30
                                     to=10
                                     for i in $(seq 1 $max); do
-                                      resp=$(curl -fksS --connect-timeout $to https://argocd.localhost:443/healthz 2>/dev/null) || true
+                                      resp=$(curl -ksS --connect-timeout $to https://argocd.localhost:443/healthz 2>/dev/null) || true
                                       if [ "$resp" = "ok" ]; then
                                         echo "argocd.localhost:443"
                                         exit 0
