@@ -200,7 +200,8 @@ pipeline {
 
                     def imageTags = [
                         BUILD_NUMBER.toString(),
-                        commitShort
+                        commitShort,
+                        'latest'   // pour ArgoCD / déploiement K8s (application utilise tag: latest)
                     ]
                     
                     // Ajouter la version seulement si elle n'est pas vide ou null
