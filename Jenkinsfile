@@ -335,10 +335,10 @@ pipeline {
                                 returnStdout: true
                             ).trim()
                             if (!ok) {
-                                error("""ArgoCD unreachable depuis l'agent (argocd.localhost:443 et host.docker.internal:8084 ont échoué).
-                                    Les deux chemins nécessitent que le port-forward soit actif sur l'hôte.
-                                    Sur l'hôte, lancer AVANT le job : cd infra && ./main.sh argocd-port-forward 8084
-                                    Puis recréer la stack si besoin : docker compose up -d --force-recreate""")
+                                error("""ArgoCD unreachable (502 Bad Gateway sur argocd.localhost = même cause).
+                                    Le port-forward doit être actif sur l'hôte. Sur l'hôte, dans un terminal :
+                                      cd infra && ./main.sh argocd-port-forward 8084
+                                    Garder ce terminal ouvert pendant le job. Sans lui, argocd.localhost renvoie 502 et 8084 = connection refused.""")
                             }
                             def parts = ok.split('\\|', -1)
                             env.ARGOCD_HOST = parts[0] ?: ''
@@ -372,7 +372,7 @@ pipeline {
                                     echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
                                     /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>&1 || true
                                     case "\${ARGOCD_HOST}" in
-                                      *8084*) echo ""; echo ">>> 8084 = connexion refusée (pas de port-forward). Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084"; echo ">>> Ou faire répondre argocd.localhost : cd infra && docker compose up -d --force-recreate" ;;
+                                      *8084*) echo ""; echo ">>> 502 Bad Gateway ou 8084 = pas de port-forward. Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084 (garder le terminal ouvert)" ;;
                                     esac
                                     exit 1
                                 fi
