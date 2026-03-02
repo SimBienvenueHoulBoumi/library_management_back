@@ -345,97 +345,97 @@ pipeline {
                     }
                 }
 
-                stage('ArgoCD – Login') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                set -e
-                                sleep 3
-                                login_ok=0
-                                for attempt in 1 2 3 4 5; do
-                                    if /usr/local/bin/argocd login "\${ARGOCD_HOST}" \\
-                                        --username admin \\
-                                        --password "\${ARGOCD_TOKEN}" \\
-                                        \${ARGOCD_LOGIN_EXTRA} \\
-                                        --grpc-web \\
-                                        --insecure 2>/dev/null; then
-                                        login_ok=1
-                                        break
-                                    fi
-                                    echo "Tentative \$attempt/5 échouée, nouvel essai dans 3s..."
-                                    sleep 3
-                                done
-                                if [ "\$login_ok" != "1" ]; then
-                                    echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
-                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>&1 || true
-                                    case "\${ARGOCD_HOST}" in
-                                      *8084*) echo ""; echo ">>> 8084 = connexion refusée (pas de port-forward). Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084"; echo ">>> Ou faire répondre argocd.localhost : cd infra && docker compose up -d --force-recreate" ;;
-                                    esac
-                                    exit 1
-                                fi
-                            """
-                        }
-                        echo "Login ArgoCD OK"
-                    }
-                }
+                // stage('ArgoCD – Login') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                //             sh """
+                //                 set -e
+                //                 sleep 3
+                //                 login_ok=0
+                //                 for attempt in 1 2 3 4 5; do
+                //                     if /usr/local/bin/argocd login "\${ARGOCD_HOST}" \\
+                //                         --username admin \\
+                //                         --password "\${ARGOCD_TOKEN}" \\
+                //                         \${ARGOCD_LOGIN_EXTRA} \\
+                //                         --grpc-web \\
+                //                         --insecure 2>/dev/null; then
+                //                         login_ok=1
+                //                         break
+                //                     fi
+                //                     echo "Tentative \$attempt/5 échouée, nouvel essai dans 3s..."
+                //                     sleep 3
+                //                 done
+                //                 if [ "\$login_ok" != "1" ]; then
+                //                     echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
+                //                     /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>&1 || true
+                //                     case "\${ARGOCD_HOST}" in
+                //                       *8084*) echo ""; echo ">>> 8084 = connexion refusée (pas de port-forward). Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084"; echo ">>> Ou faire répondre argocd.localhost : cd infra && docker compose up -d --force-recreate" ;;
+                //                     esac
+                //                     exit 1
+                //                 fi
+                //             """
+                //         }
+                //         echo "Login ArgoCD OK"
+                //     }
+                // }
 
-                stage('ArgoCD – Vérifier app') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
-                                if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-                                    echo "Application ${ARGOCD_APP} non trouvée. La créer via Ansible (playbook gitops)."
-                                    exit 1
-                                fi
-                                echo "Application ${ARGOCD_APP} trouvée."
-                            """
-                        }
-                    }
-                }
+                // stage('ArgoCD – Vérifier app') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                //             sh """
+                //                 /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                //                 if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
+                //                     echo "Application ${ARGOCD_APP} non trouvée. La créer via Ansible (playbook gitops)."
+                //                     exit 1
+                //                 fi
+                //                 echo "Application ${ARGOCD_APP} trouvée."
+                //             """
+                //         }
+                //     }
+                // }
 
-                stage('ArgoCD – Set image') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            script {
-                                def imageTag = env.BUILD_NUMBER ?: 'latest'
-                                def repo = env.K8S_IMAGE_REPO
-                                sh """
-                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
-                                    /usr/local/bin/argocd app set ${ARGOCD_APP} \\
-                                        --helm-set "image.repository=${repo}" \\
-                                        --helm-set "image.tag=${imageTag}" \\
-                                        --grpc-web
-                                """
-                            }
-                        }
-                        echo "Image ${env.K8S_IMAGE_REPO}:${env.BUILD_NUMBER ?: 'latest'} définie"
-                    }
-                }
+                // stage('ArgoCD – Set image') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                //             script {
+                //                 def imageTag = env.BUILD_NUMBER ?: 'latest'
+                //                 def repo = env.K8S_IMAGE_REPO
+                //                 sh """
+                //                     /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                //                     /usr/local/bin/argocd app set ${ARGOCD_APP} \\
+                //                         --helm-set "image.repository=${repo}" \\
+                //                         --helm-set "image.tag=${imageTag}" \\
+                //                         --grpc-web
+                //                 """
+                //             }
+                //         }
+                //         echo "Image ${env.K8S_IMAGE_REPO}:${env.BUILD_NUMBER ?: 'latest'} définie"
+                //     }
+                // }
 
-                stage('ArgoCD – Sync') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
-                                /usr/local/bin/argocd app sync ${ARGOCD_APP} --grpc-web --timeout 300 --prune --force
-                            """
-                        }
-                        echo "Sync ${ARGOCD_APP} terminé"
-                    }
-                }
+                // stage('ArgoCD – Sync') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                //             sh """
+                //                 /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                //                 /usr/local/bin/argocd app sync ${ARGOCD_APP} --grpc-web --timeout 300 --prune --force
+                //             """
+                //         }
+                //         echo "Sync ${ARGOCD_APP} terminé"
+                //     }
+                // }
 
-                stage('ArgoCD – Attendre déploiement') {
-                    steps {
-                        withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
-                            sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
-                                /usr/local/bin/argocd app wait ${ARGOCD_APP} --grpc-web --timeout 300 --health
-                            """
-                        }
-                        echo "Application conteneurisée déployée et healthy"
-                    }
-                }
+                // stage('ArgoCD – Attendre déploiement') {
+                //     steps {
+                //         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
+                //             sh """
+                //                 /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                //                 /usr/local/bin/argocd app wait ${ARGOCD_APP} --grpc-web --timeout 300 --health
+                //             """
+                //         }
+                //         echo "Application conteneurisée déployée et healthy"
+                //     }
+                // }
 
                 stage('ArgoCD – Statut') {
                     steps {
