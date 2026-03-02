@@ -27,14 +27,15 @@ pipeline {
         GIT_REPO_URL       = 'git@github.com:SimBienvenueHoulBoumi/library_management_back.git'
         GIT_CREDENTIALS    = 'JENKINS_AGENT'
 
-        // ─── Container Registry ─────────────────────────────────────────
-        // Note: L'agent Jenkins utilise le daemon Docker de l'hôte via /var/run/docker.sock
-        // Le repository Docker dans Nexus est accessible via le chemin /repository/docker-hosted
-        // Port mapping: 8083 (hôte) → 8082 (conteneur Nexus) = Registry Docker
-        // Port mapping: 8082 (hôte) → 8081 (conteneur Nexus) = UI Nexus
-        NEXUS_REGISTRY     = 'localhost:8083/repository/docker-hosted'  // Chemin complet du repository Docker
-        REGISTRY_CRED      = 'NEXUS_CREDENTIALS'
-        IMAGE_REPO         = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+        // ─── Container Registry (Nexus docker-hosted) ────────────────────
+        // Nexus URL: https://nexus.localhost/repository/docker-hosted/
+        // OBLIGATOIRE: Dans Jenkins → Manage Jenkins → Credentials, créer une credential
+        // de type "Username with password" (pas "Secret text") avec ID = NEXUS_CREDENTIALS,
+        // username = admin Nexus, password = mot de passe admin (./main.sh nexus-password).
+        NEXUS_REGISTRY_HOST = 'nexus:8082'
+        NEXUS_REGISTRY      = "${NEXUS_REGISTRY_HOST}/repository/docker-hosted"
+        REGISTRY_CRED       = 'NEXUS_CREDENTIALS'
+        IMAGE_REPO          = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
         // Pour Kubernetes, utiliser host.docker.internal pour accéder depuis le cluster
         K8S_IMAGE_REPO     = "host.docker.internal:8083/repository/docker-hosted/simdev/${PROJECT_NAME}"
 
@@ -264,7 +265,7 @@ pipeline {
 
         /**
          * Push des images Docker vers Nexus Registry
-         * - Connexion au registry HTTP (localhost:8083)
+         * - Connexion au registry HTTP (nexus:8082, même réseau Docker que l'agent)
          * - Push de toutes les images taggées (BUILD_NUMBER, commit SHA, version)
          */
         stage('📦 Push Images') {
@@ -272,11 +273,11 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh """
-                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY} -u "\${USER}" --password-stdin || exit 1
+                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY_HOST} -u "\${USER}" --password-stdin || exit 1
 
                         ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
-                        docker logout ${NEXUS_REGISTRY}
+                        docker logout ${NEXUS_REGISTRY_HOST}
                     """
                 }
             }
