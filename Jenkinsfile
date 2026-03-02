@@ -305,44 +305,29 @@ pipeline {
                 stage('ArgoCD – Détecter serveur') {
                     steps {
                         script {
-                            // Privilégier argocd.localhost:443 (Traefik) : 25 tentatives, timeout 10s. 8084 nécessite port-forward sur l'hôte.
+                            // Uniquement argocd.localhost (Traefik) : même chemin pour détection et login, pas de 8084 direct.
+                            env.ARGOCD_HOST = 'argocd.localhost:443'
+                            env.ARGOCD_LOGIN_EXTRA = ''
                             def ok = sh(
                                 script: '''
-                                    for try_https in 1 0; do
-                                      if [ "$try_https" = "1" ]; then
-                                        h="argocd.localhost:443"
-                                        e=""
-                                        p="https"
-                                        max=25
-                                        to=10
-                                      else
-                                        h="host.docker.internal:8084"
-                                        e="--plaintext"
-                                        p="http"
-                                        max=10
-                                        to=5
+                                    max=30
+                                    to=10
+                                    for i in $(seq 1 $max); do
+                                      if curl -fksS --connect-timeout $to https://argocd.localhost:443/healthz >/dev/null 2>&1; then
+                                        echo "argocd.localhost:443"
+                                        exit 0
                                       fi
-                                      for i in $(seq 1 $max); do
-                                        if curl -fksS --connect-timeout $to "$p://$h/healthz" >/dev/null 2>&1; then
-                                          echo "$h|$e"
-                                          exit 0
-                                        fi
-                                        sleep 2
-                                      done
+                                      sleep 2
                                     done
                                     exit 1
                                 ''',
                                 returnStdout: true
                             ).trim()
                             if (!ok) {
-                                error("""ArgoCD unreachable (502 Bad Gateway sur argocd.localhost = même cause).
-                                    Le port-forward doit être actif sur l'hôte. Sur l'hôte, dans un terminal :
-                                      cd infra && ./main.sh argocd-port-forward 8084
-                                    Garder ce terminal ouvert pendant le job. Sans lui, argocd.localhost renvoie 502 et 8084 = connection refused.""")
+                                error("""ArgoCD unreachable (https://argocd.localhost). Port-forward requis sur l'hôte :
+                                    cd infra && ./main.sh argocd-port-forward 8084
+                                    Garder ce terminal ouvert pendant tout le job Jenkins.""")
                             }
-                            def parts = ok.split('\\|', -1)
-                            env.ARGOCD_HOST = parts[0] ?: ''
-                            env.ARGOCD_LOGIN_EXTRA = (parts.length > 1 && parts[1]) ? parts[1] : ''
                         }
                         echo "Serveur ArgoCD : ${env.ARGOCD_HOST}"
                     }
@@ -356,10 +341,9 @@ pipeline {
                                 sleep 3
                                 login_ok=0
                                 for attempt in 1 2 3 4 5; do
-                                    if /usr/local/bin/argocd login "\${ARGOCD_HOST}" \\
+                                    if /usr/local/bin/argocd login argocd.localhost:443 \\
                                         --username admin \\
                                         --password "\${ARGOCD_TOKEN}" \\
-                                        \${ARGOCD_LOGIN_EXTRA} \\
                                         --grpc-web \\
                                         --insecure 2>/dev/null; then
                                         login_ok=1
@@ -370,10 +354,8 @@ pipeline {
                                 done
                                 if [ "\$login_ok" != "1" ]; then
                                     echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
-                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>&1 || true
-                                    case "\${ARGOCD_HOST}" in
-                                      *8084*) echo ""; echo ">>> 502 Bad Gateway ou 8084 = pas de port-forward. Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084 (garder le terminal ouvert)" ;;
-                                    esac
+                                    /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>&1 || true
+                                    echo ""; echo ">>> Vérifier le port-forward sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084 (garder le terminal ouvert)"
                                     exit 1
                                 fi
                             """
@@ -386,7 +368,7 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
                                 if ! /usr/local/bin/argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
                                     echo "Application ${ARGOCD_APP} non trouvée. La créer via Ansible (playbook gitops)."
                                     exit 1
@@ -404,7 +386,7 @@ pipeline {
                                 def imageTag = env.BUILD_NUMBER ?: 'latest'
                                 def repo = env.K8S_IMAGE_REPO
                                 sh """
-                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                    /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
                                     /usr/local/bin/argocd app set ${ARGOCD_APP} \\
                                         --helm-set "image.repository=${repo}" \\
                                         --helm-set "image.tag=${imageTag}" \\
@@ -420,7 +402,7 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
                                 /usr/local/bin/argocd app sync ${ARGOCD_APP} --grpc-web --timeout 300 --prune --force
                             """
                         }
@@ -432,7 +414,7 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
                                 /usr/local/bin/argocd app wait ${ARGOCD_APP} --grpc-web --timeout 300 --health
                             """
                         }
@@ -444,7 +426,7 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: ARGOCD_CRED, variable: 'ARGOCD_TOKEN')]) {
                             sh """
-                                /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>/dev/null || true
+                                /usr/local/bin/argocd login argocd.localhost:443 --username admin --password "\${ARGOCD_TOKEN}" --grpc-web --insecure 2>/dev/null || true
                                 /usr/local/bin/argocd app get ${ARGOCD_APP} --grpc-web 2>&1 | grep -E "Name:|Namespace:|Sync:|Health:|Status:" || true
                             """
                         }
