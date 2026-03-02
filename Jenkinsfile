@@ -306,7 +306,7 @@ pipeline {
                 stage('ArgoCD – Détecter serveur') {
                     steps {
                         script {
-                            // Même logique que l'autre (bloc ArgoCD d'origine) : 15 tentatives HTTPS, 10 HTTP, sleep 2
+                            // Privilégier argocd.localhost:443 (Traefik) : 25 tentatives, timeout 10s. 8084 nécessite port-forward sur l'hôte.
                             def ok = sh(
                                 script: '''
                                     for try_https in 1 0; do
@@ -314,15 +314,17 @@ pipeline {
                                         h="argocd.localhost:443"
                                         e=""
                                         p="https"
-                                        max=15
+                                        max=25
+                                        to=10
                                       else
                                         h="host.docker.internal:8084"
                                         e="--plaintext"
                                         p="http"
                                         max=10
+                                        to=5
                                       fi
                                       for i in $(seq 1 $max); do
-                                        if curl -fksS --connect-timeout 5 "$p://$h/healthz" >/dev/null 2>&1; then
+                                        if curl -fksS --connect-timeout $to "$p://$h/healthz" >/dev/null 2>&1; then
                                           echo "$h|$e"
                                           exit 0
                                         fi
@@ -365,11 +367,11 @@ pipeline {
                                     sleep 3
                                 done
                                 if [ "\$login_ok" != "1" ]; then
-                                    echo "ArgoCD login échoué après 5 tentatives. Erreur CLI :"
-                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure || true
-                                    if echo "\${ARGOCD_HOST}" | grep -q 8084; then
-                                        echo ">>> Connexion refusée sur 8084 : cd infra && docker compose up -d --force-recreate (argocd.localhost)"
-                                    fi
+                                    echo "ArgoCD login échoué après 5 tentatives. Dernière erreur :"
+                                    /usr/local/bin/argocd login "\${ARGOCD_HOST}" --username admin --password "\${ARGOCD_TOKEN}" \${ARGOCD_LOGIN_EXTRA} --grpc-web --insecure 2>&1 || true
+                                    case "\${ARGOCD_HOST}" in
+                                      *8084*) echo ""; echo ">>> 8084 = connexion refusée (pas de port-forward). Sur l'hôte : cd infra && ./main.sh argocd-port-forward 8084"; echo ">>> Ou faire répondre argocd.localhost : cd infra && docker compose up -d --force-recreate" ;;
+                                    esac
                                     exit 1
                                 fi
                             """
