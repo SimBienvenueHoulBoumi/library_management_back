@@ -305,9 +305,7 @@ pipeline {
                 stage('ArgoCD – Détecter serveur') {
                     steps {
                         script {
-                            // Uniquement argocd.localhost (Traefik) : même chemin pour détection et login, pas de 8084 direct.
                             env.ARGOCD_HOST = 'argocd.localhost:443'
-                            env.ARGOCD_LOGIN_EXTRA = ''
                             def ok = sh(
                                 script: '''
                                     max=30
@@ -325,12 +323,12 @@ pipeline {
                                 returnStdout: true
                             ).trim()
                             if (!ok) {
-                                error("""ArgoCD unreachable (https://argocd.localhost). Port-forward requis sur l'hôte :
+                                error("""ArgoCD unreachable : /healthz n'a pas retourné 'ok'. Port-forward requis sur l'hôte :
                                     cd infra && ./main.sh argocd-port-forward 8084
                                     Garder ce terminal ouvert pendant tout le job Jenkins.""")
                             }
                         }
-                        echo "Serveur ArgoCD : ${env.ARGOCD_HOST}"
+                        echo "Serveur ArgoCD prêt : ${env.ARGOCD_HOST}"
                     }
                 }
 
