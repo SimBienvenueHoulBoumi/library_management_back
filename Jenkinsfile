@@ -2,6 +2,10 @@
 // Pipeline CI/CD – library-management
 // Modern & Maintainable version – 2025/2026 practices
 // ======================================================================
+// Nécessite un nœud "jenkins-agent" (créé par init-agent.groovy au démarrage de Jenkins).
+// Si le job reste en "Still waiting to schedule task" : vérifier que le conteneur jenkins-agent
+// tourne et est connecté (Manage Jenkins → Nodes). Depuis l'hôte : ./main.sh restart-jenkins-agent
+// ======================================================================
 pipeline {
     agent { node { label 'jenkins-agent' } }
 
