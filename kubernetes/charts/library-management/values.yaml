@@ -43,6 +43,9 @@ service:
   type: ClusterIP
   port: 8075
   targetPort: 8075
+  # Pour accès via Traefik (library-management.localhost) sans port-forward : NodePort + nodePort 30075
+  # et Kind créé avec extraPortMappings (voir infra/kind-library-management.yaml)
+  nodePort: 30075
 
 ingress:
   enabled: false

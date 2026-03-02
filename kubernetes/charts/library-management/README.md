@@ -73,6 +73,19 @@ Le chart est automatiquement déployé par ArgoCD via le pipeline Jenkins.
 2. ArgoCD synchronise le chart depuis le repository Git
 3. L'application est déployée dans le cluster Kubernetes
 
+### Accès à l'application (Swagger UI) sans port-forward
+
+Avec l'infra (Traefik + Kind configuré avec `kind-config.yaml`) :
+
+- **URL :** https://library-management.localhost/swagger-ui.html  
+- **Health :** https://library-management.localhost/actuator/health  
+
+Le sous-domaine `.localhost` est résolu automatiquement vers 127.0.0.1 (pas besoin de modifier `/etc/hosts`).  
+Le Service est exposé en NodePort 30075 ; Traefik route `library-management.localhost` vers ce port.
+
+Pour un **nouveau cluster Kind**, créer le cluster avec la config qui expose le port :  
+`cd infra && ./main.sh cluster-create kind` (utilise `kind-config.yaml`).
+
 ## Personnalisation
 
 Modifiez `values.yaml` pour personnaliser :
@@ -87,3 +100,42 @@ Modifiez `values.yaml` pour personnaliser :
 - L'image Docker doit être accessible depuis le cluster Kubernetes
 - Pour un cluster local (kind/k3d), utilisez `host.docker.internal:8083` dans l'image
 - Pour un cluster distant, configurez un registry accessible (Nexus, Docker Hub, etc.)
+
+
+```bash
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: library-management
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/SimBienvenueHoulBoumi/library_management_back.git'
+    path: kubernetes/charts/library-management
+    targetRevision: HEAD
+    helm:
+      releaseName: library-management
+      valueFiles: []
+      values: |
+        image:
+          repository: 172.17.0.1:8083/repository/docker-hosted/simdev/library-management
+          tag: latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+```
