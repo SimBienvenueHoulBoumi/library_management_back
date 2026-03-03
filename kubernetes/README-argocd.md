@@ -19,7 +19,7 @@ ArgoCD va alors suivre le chart Helm `kubernetes/charts/library-management` du d
 
 L’image Docker est fixée via `source.helm.parameters`. Si le pull échoue (**EOF**, timeout), voir la section *Contournement : charger l’image dans Kind* ci‑dessous.
 
-**Tag de déploiement :** le chart utilise le tag **`latest`** (dernière image poussée par le pipeline, sans SNAPSHOT). Le pipeline Jenkins pousse et charge dans Kind l’image avec ce tag.
+**Déploiement Kind (sans pull) :** le chart utilise **imagePullPolicy: Never** pour éviter les erreurs de pull (EOF) depuis le registry. L’image doit être **chargée dans Kind** avant la Sync (voir ci‑dessous). Tag = **`latest`**.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -42,6 +42,8 @@ spec:
           value: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
         - name: image.tag
           value: "latest"
+        - name: image.pullPolicy
+          value: "Never"
   project: default
   syncPolicy:
     automated:
@@ -51,15 +53,16 @@ spec:
 
 ---
 
-## Pod « waiting to start: trying and failing to pull image »
+## Obligatoire : charger l’image dans Kind avant la Sync
 
-Si le pod reste en attente ou en **ImagePullBackOff**, mettre le paramètre Helm **image.tag** à **`latest`** dans l’app ArgoCD, puis charger l’image dans Kind **sur la machine hôte** :
+Avec **imagePullPolicy: Never**, le pod **ne fait jamais de pull** (évite l’erreur EOF). L’image doit déjà être présente dans le cluster. À exécuter **sur la machine hôte** (où tournent Docker et Kind), **avant** ou après chaque nouveau build :
 
 ```bash
 kind load docker-image host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest --name dev
 ```
 
-Puis dans ArgoCD : **Sync** l’application. Vérifier que l’app a bien `image.repository` = `host.docker.internal:8083/repository/docker-hosted/simdev/library-management` et `image.tag` = `latest`.
+- Si l’image `:latest` n’existe pas encore en local : lancer un build Jenkins (qui pousse et tague `latest`), ou `docker build -t host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest .` puis la commande ci‑dessus.
+- Dans l’app ArgoCD : **image.tag** = `latest`, **image.pullPolicy** = `Never`. Puis **Sync**.
 
 ---
 
