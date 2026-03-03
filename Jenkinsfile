@@ -37,8 +37,10 @@ pipeline {
         NEXUS_REGISTRY      = "${NEXUS_REGISTRY_HOST}/repository/docker-hosted"
         REGISTRY_CRED       = 'NEXUS_CREDENTIALS'
         IMAGE_REPO          = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
-        // Pour Kubernetes, utiliser host.docker.internal pour accéder depuis le cluster
-        K8S_IMAGE_REPO     = "host.docker.internal:8083/repository/docker-hosted/simdev/${PROJECT_NAME}"
+        // Même référence que IMAGE_REPO : le chart Helm / ArgoCD doit utiliser ce chemin pour que le pull (ou kind load) corresponde.
+        K8S_IMAGE_REPO      = "${IMAGE_REPO}"
+        // Nom du cluster Kind pour l'étape "Load image into Kind" (évite le pull depuis Nexus par les nœuds).
+        KIND_CLUSTER_NAME   = 'dev'
 
         // ─── Quality & Security ─────────────────────────────────────────
         SONAR_URL          = 'http://sonarqube:9000'
@@ -279,6 +281,31 @@ pipeline {
                         ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
                         docker logout ${NEXUS_REGISTRY_HOST}
+                    """
+                }
+            }
+        }
+
+        /**
+         * Charge l'image dans le cluster Kind pour éviter le pull depuis Nexus (réseau Kind ↔ hôte souvent instable).
+         * Utilise la même référence d'image que le chart Helm (IMAGE_REPO) pour que le pod utilise l'image locale (imagePullPolicy: IfNotPresent).
+         * Prérequis : kind en PATH sur l'agent, cluster "${KIND_CLUSTER_NAME}" existant.
+         */
+        stage('📤 Load Image into Kind') {
+            when { expression { shouldBuildAndPush() } }
+            steps {
+                script {
+                    def tagToLoad = env.PROJECT_VERSION?.trim() ?: env.BUILD_NUMBER
+                    def imageRef = "${IMAGE_REPO}:${tagToLoad}"
+                    def deployTag = 'latest'
+                    sh """
+                        if command -v kind >/dev/null 2>&1; then
+                            kind load docker-image '${imageRef}' --name ${KIND_CLUSTER_NAME} || true
+                            kind load docker-image '${IMAGE_REPO}:${deployTag}' --name ${KIND_CLUSTER_NAME} || true
+                        else
+                            echo "⚠️ kind non trouvé. Pour éviter ImagePullBackOff, exécuter sur l'hôte :"
+                            echo "   kind load docker-image '${IMAGE_REPO}:${deployTag}' --name ${KIND_CLUSTER_NAME}"
+                        fi
                     """
                 }
             }

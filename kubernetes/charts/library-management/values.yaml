@@ -4,14 +4,12 @@
 replicaCount: 1
 
 image:
-  # IMPORTANT: Pour kind/k3d, remplacez host.docker.internal par l'IP de votre machine hôte
-  # Obtenir l'IP: ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1
-  # Exemple: repository: 192.168.1.100:8083/simdev/library-management
-  repository: 172.20.10.1:8083/simdev/library-management
+  # Doit être identique à IMAGE_REPO dans le Jenkinsfile (push + kind load).
+  # Format Nexus docker-hosted : host:port/repository/docker-hosted/simdev/<app>.
+  repository: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  # Le tag sera mis à jour automatiquement par ArgoCD via le pipeline Jenkins
-  tag: "0.0.1-SNAPSHOT"
+  # Tag pour le déploiement : "latest" = dernière image poussée par le pipeline (sans SNAPSHOT).
+  tag: "latest"
 
 imagePullSecrets: []
 nameOverride: ""
