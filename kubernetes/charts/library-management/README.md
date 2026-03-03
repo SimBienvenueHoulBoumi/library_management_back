@@ -101,8 +101,19 @@ Modifiez `values.yaml` pour personnaliser :
 - Pour un cluster local (kind/k3d), utilisez `host.docker.internal:8083` dans l'image
 - Pour un cluster distant, configurez un registry accessible (Nexus, Docker Hub, etc.)
 
+### Manifeste ArgoCD à coller dans l’UI
+
+Utilise **host.docker.internal** (aligné avec le Jenkinsfile et `kind load`). Avant la Sync, charger l’image dans Kind :
 
 ```bash
+./main.sh load-app-image   # depuis infra/
+# ou : ./infra/main.sh load-app-image   # depuis la racine des projets
+```
+(Depuis la racine du projet **infra** ; charge l’image dans Kind une fois après le 1er build Jenkins.)
+
+Puis créer l’application dans ArgoCD (NEW APP → EDIT AS YAML) et coller le YAML ci‑dessous.
+
+```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -121,8 +132,17 @@ spec:
       valueFiles: []
       values: |
         image:
-          repository: 172.17.0.1:8083/repository/docker-hosted/simdev/library-management
+          repository: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
           tag: latest
+          pullPolicy: Never
+        service:
+          type: NodePort
+          nodePort: 30075
+        readinessProbe:
+          initialDelaySeconds: 45
+          failureThreshold: 6
+        livenessProbe:
+          initialDelaySeconds: 60
   destination:
     server: https://kubernetes.default.svc
     namespace: default

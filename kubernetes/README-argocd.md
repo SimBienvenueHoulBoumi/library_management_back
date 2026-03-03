@@ -17,9 +17,10 @@ ArgoCD va alors suivre le chart Helm `kubernetes/charts/library-management` du d
 
 ## Manifeste à coller dans l’UI ArgoCD
 
-L’image Docker est fixée via `source.helm.parameters`. Si le pull échoue (**EOF**, timeout), voir la section *Contournement : charger l’image dans Kind* ci‑dessous.
+**Pour une nouvelle création** : ce manifeste fixe le Service en **NodePort 30075**, aligné avec Traefik (`https://library-management.localhost`). Les liens Swagger / API fonctionnent dès la première Sync (pas de Bad Gateway).
 
-**Déploiement Kind (sans pull) :** image **chargée dans Kind** avant la Sync. Probes avec délais pour éviter « Readiness probe failed » au démarrage de Spring Boot.
+- Image et probes : voir les paramètres Helm ci‑dessous. Charger l’image dans Kind avant la Sync : `./main.sh load-app-image` (depuis le projet infra).
+- Si le pull échoue (EOF, timeout), voir la section *Contournement : charger l’image dans Kind* plus bas.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -28,38 +29,66 @@ metadata:
   name: library-management
   namespace: argocd
 spec:
-  destination:
-    name: ''
-    namespace: default
-    server: https://kubernetes.default.svc
+  project: default
+
   source:
-    path: kubernetes/charts/library-management
     repoURL: https://github.com/SimBienvenueHoulBoumi/library_management_back.git
+    path: kubernetes/charts/library-management
     targetRevision: HEAD
     helm:
       parameters:
         - name: image.repository
           value: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
         - name: image.tag
-          value: "latest"
+          value: latest
         - name: image.pullPolicy
-          value: "Never"
+          value: Never
+        - name: service.type
+          value: NodePort
+        - name: service.nodePort
+          value: "30075"
         - name: readinessProbe.initialDelaySeconds
           value: "45"
         - name: livenessProbe.initialDelaySeconds
           value: "60"
-  project: default
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+
+  links:
+    - title: Swagger UI
+      url: https://library-management.localhost/swagger-ui.html
+    - title: API Health
+      url: https://library-management.localhost/actuator/health
+    - title: API (base)
+      url: https://library-management.localhost
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
 ```
 
+**Automatisation Jenkins** : le pipeline exécute `scripts/deploy-argocd.sh` après Push et Load Image. Le script crée l’app si elle n’existe pas (même spec : NodePort 30075, probes, etc.) puis met à jour l’image et lance la Sync. Prérequis : **argocd CLI** sur l’agent, credential **ARGOCD_ADMIN_PASSWORD** (Secret text = mot de passe admin ArgoCD).
+
 ---
 
 ## Obligatoire : charger l’image dans Kind avant la Sync
 
-Avec **imagePullPolicy: Never**, le pod **ne fait jamais de pull** (évite l’erreur EOF). L’image doit déjà être présente dans le cluster. À exécuter **sur la machine hôte** (où tournent Docker et Kind), **avant** ou après chaque nouveau build :
+Avec **imagePullPolicy: Never**, le pod **ne fait jamais de pull** (évite l’erreur EOF). L’image doit déjà être présente dans le cluster. **Automatisé avec Ansible (une seule commande)** :
+
+```bash
+# Depuis la racine du projet infra :
+./main.sh load-app-image
+
+# Ou depuis la racine des projets (parent de infra) :
+./infra/main.sh load-app-image
+```
+
+(Si l’image existe en local, elle est chargée dans Kind ; sinon le script indique de lancer un build Jenkins puis de relancer cette commande.)
+
+**Manuel** (équivalent) :
 
 ```bash
 kind load docker-image host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest --name dev
@@ -70,7 +99,32 @@ kind load docker-image host.docker.internal:8083/repository/docker-hosted/simdev
 
 ---
 
+## « Image not present with pull policy of Never »
+
+L’erreur indique la **référence exacte** demandée par le déploiement (ex. `172.17.0.1:8083/repository/docker-hosted/simdev/library-management:latest`). Avec **Never**, Kind n’utilise que l’image déjà chargée **sous cette même référence**.
+
+**À faire :** charger l’image dans Kind avec **exactement** la même référence que dans l’erreur.
+
+- **Si l’app ArgoCD utilise `host.docker.internal:8083/...`** (comme le manifeste ci‑dessus) :
+  ```bash
+  kind load docker-image host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest --name dev
+  ```
+
+- **Si l’app ArgoCD utilise `172.17.0.1:8083/...`** (Option B du README) : l’image en local est souvent taguée `host.docker.internal:8083/...`. Taguer puis charger :
+  ```bash
+  docker tag host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest \
+    172.17.0.1:8083/repository/docker-hosted/simdev/library-management:latest
+  kind load docker-image 172.17.0.1:8083/repository/docker-hosted/simdev/library-management:latest --name dev
+  ```
+  Si l’image n’existe pas encore en local : build ou pull sous `host.docker.internal:8083/...`, puis faire le `docker tag` + `kind load` ci‑dessus.
+
+Ensuite : **Sync** (ou redémarrage du déploiement) dans ArgoCD. Pour éviter la confusion, garder **une seule** référence dans l’app (de préférence `host.docker.internal:8083/...`, comme le manifeste et le Jenkinsfile).
+
+---
+
 ## Accès à l’API (Swagger, routes, autre app)
+
+**library-management est bien dans Traefik** : la route est définie dans le fichier `traefik/dynamic.yml` de l’infra (router `library-management-router` → service `library-management-service` → `http://host.docker.internal:30075`). Pour le voir dans le dashboard Traefik : **https://traefik.localhost/dashboard/** (ou http://localhost:8081). Onglet **HTTP** → **Routers** : `library-management-router`.
 
 Une fois le pod **Running** et le Service en **NodePort** (chart par défaut), l’API est exposée via Traefik. Vérifier que l’entrée existe dans `/etc/hosts` : `127.0.0.1 library-management.localhost` (ou `./main.sh ensure-hosts` depuis l’infra).
 
@@ -87,6 +141,44 @@ Authentification : HTTP Basic (voir README du projet pour les identifiants par d
 **Depuis une autre application** :
 - **Navigateur ou front (même machine)** : `fetch('https://library-management.localhost/api/books')` (gérer CORS si besoin).
 - **Pod dans le même cluster Kubernetes** : utiliser l’URL interne du service : `http://library-management.default.svc.cluster.local:8075` (pas de HTTPS, pas de Traefik).
+
+---
+
+## Bad Gateway en accédant à Swagger / library-management.localhost
+
+Traefik envoie le trafic vers **host.docker.internal:30075**. Si tu as un **Bad Gateway**, vérifier dans l’ordre :
+
+**1. Le Service est bien en NodePort avec le port 30075**
+
+```bash
+kubectl get svc library-management -n default
+```
+
+Tu dois voir **NodePort** et **30075** (ex. `8075:30075/TCP`).  
+- Si tu vois un autre port (ex. `8075:31484/TCP`) : Traefik pointe vers 30075, donc 502. **Correction** : dans l’app ArgoCD, ajouter dans les values Helm : `service.type: NodePort` et `service.nodePort: 30075`, puis supprimer le Service et re-Sync pour qu’il soit recréé avec le bon port :
+  ```bash
+  kubectl delete svc library-management -n default
+  ```
+  Puis dans ArgoCD : **Sync** (l’app recrée le Service avec `nodePort: 30075`).  
+- Si le type est **ClusterIP**, faire une **Sync** en ayant `service.type: NodePort` (et `service.nodePort: 30075`) dans les values de l’app.
+
+**2. L’API répond directement sur l’hôte (sans Traefik)**
+
+```bash
+curl -s http://localhost:30075/actuator/health
+```
+
+- Si **connection refused** : le cluster Kind n’expose pas le port 30075 sur l’hôte. Il faut avoir créé le cluster avec le **kind-config.yaml** de l’infra (il contient `extraPortMappings` pour 30075). Recréer le cluster avec :  
+  `kind create cluster --name dev --config <chemin-vers-kind-config.yaml>`
+- Si **curl** renvoie du JSON (ex. `{"status":"UP"}`) : l’API est OK ; le blocage est entre Traefik et l’hôte. Redémarrer Traefik : depuis l’infra `./main.sh restart-traefik`, puis réessayer https://library-management.localhost/swagger-ui.html
+
+**3. Vérifier /etc/hosts**
+
+```bash
+grep library-management.localhost /etc/hosts
+```
+
+Doit contenir : `127.0.0.1 library-management.localhost`. Sinon : `./main.sh ensure-hosts` (depuis le projet infra).
 
 ---
 

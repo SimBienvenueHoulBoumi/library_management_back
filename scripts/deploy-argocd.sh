@@ -13,8 +13,11 @@ ARGOCD_USER="${ARGOCD_USER:-admin}"
 ARGOCD_PASS="${ARGOCD_PASS:-}"
 ARGOCD_APP="${ARGOCD_APP:-library-management}"
 ARGOCD_NS="${ARGOCD_NS:-default}"
-IMAGE_REPO="${IMAGE_REPO:-host.docker.internal:8083/simdev/library-management}"
+# Aligné avec le chart / README-argocd : repository docker-hosted complet
+IMAGE_REPO="${IMAGE_REPO:-host.docker.internal:8083/repository/docker-hosted/simdev/library-management}"
 IMAGE_TAG="${IMAGE_TAG:-}"
+GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/SimBienvenueHoulBoumi/library_management_back.git}"
+CHART_PATH="${CHART_PATH:-kubernetes/charts/library-management}"
 
 # Couleurs
 RED='\033[0;31m'
@@ -122,31 +125,22 @@ Options:
   -p, --password PASSWORD    Mot de passe ArgoCD (ou utiliser ARGOCD_PASS env var)
   -a, --app APP_NAME         Nom de l'application ArgoCD (défaut: library-management)
   -n, --namespace NS         Namespace Kubernetes (défaut: default)
-  -r, --repo IMAGE_REPO      Repository d'image Docker
-  -t, --tag IMAGE_TAG        Tag de l'image Docker (requis)
+  -r, --repo IMAGE_REPO      Repository d'image Docker (défaut: .../repository/docker-hosted/simdev/library-management)
+  -t, --tag IMAGE_TAG        Tag de l'image Docker (requis, ex: latest ou BUILD_NUMBER)
   -h, --help                 Afficher cette aide
 
 Variables d'environnement:
-  ARGOCD_SERVER              Serveur ArgoCD
-  ARGOCD_USER                Utilisateur ArgoCD
-  ARGOCD_PASS                Mot de passe ArgoCD
-  ARGOCD_APP                 Nom de l'application
-  ARGOCD_NS                  Namespace Kubernetes
-  IMAGE_REPO                 Repository d'image
-  IMAGE_TAG                  Tag de l'image
+  ARGOCD_SERVER, ARGOCD_USER, ARGOCD_PASS, ARGOCD_APP, ARGOCD_NS
+  IMAGE_REPO, IMAGE_TAG      Image à déployer
+  GIT_REPO_URL, CHART_PATH   Repo et chemin du chart (création automatique de l'app si absente)
+
+Comportement:
+  - Si l'application n'existe pas, elle est créée avec le même spec que README-argocd (NodePort 30075, probes, etc.).
+  - Les paramètres Helm (image, service.nodePort, pullPolicy, probes) sont alignés sur le chart qui fonctionne.
 
 Exemples:
-  # Utilisation basique
-  $0 --tag 123 --password "mon-mot-de-passe"
-
-  # Avec toutes les options
-  $0 --server host.docker.internal:8084 \\
-      --user admin \\
-      --password "mon-mot-de-passe" \\
-      --app library-management \\
-      --namespace default \\
-      --repo host.docker.internal:8083/simdev/library-management \\
-      --tag 123
+  $0 --tag latest --password "\$(cat /run/secrets/argocd-admin)"
+  ARGOCD_PASS=xxx IMAGE_TAG=latest $0
 
 EOF
 }
@@ -238,44 +232,56 @@ argocd_login() {
     log_success "Connexion réussie"
 }
 
-# Fonction pour vérifier/créer l'application
+# Paramètres Helm alignés avec le manifeste README-argocd (NodePort 30075, probes, pullPolicy)
+helm_set_args() {
+    echo \
+        --helm-set "image.repository=${IMAGE_REPO}" \
+        --helm-set "image.tag=${IMAGE_TAG}" \
+        --helm-set "image.pullPolicy=Never" \
+        --helm-set "service.type=NodePort" \
+        --helm-set "service.nodePort=30075" \
+        --helm-set "readinessProbe.initialDelaySeconds=45" \
+        --helm-set "livenessProbe.initialDelaySeconds=60"
+}
+
+# Fonction pour vérifier si l'application existe
 argocd_check_app() {
-    log_info "Vérification de l'application ${ARGOCD_APP}..."
-    
     if argocd app list --grpc-web 2>/dev/null | grep -q "^${ARGOCD_APP}\\s"; then
-        log_success "L'application ${ARGOCD_APP} existe"
-        argocd app get "$ARGOCD_APP" --grpc-web 2>&1 | head -20 || true
         return 0
     else
-        log_warning "L'application ${ARGOCD_APP} n'existe pas"
         return 1
     fi
 }
 
-# Fonction pour mettre à jour et synchroniser l'application
+# Créer l'application ArgoCD (même spec que le manifeste README-argocd)
+argocd_create_app() {
+    log_info "Création de l'application ${ARGOCD_APP} (repo: ${GIT_REPO_URL}, path: ${CHART_PATH})..."
+    argocd app create "$ARGOCD_APP" \
+        --repo "$GIT_REPO_URL" \
+        --path "$CHART_PATH" \
+        --dest-server "https://kubernetes.default.svc" \
+        --dest-namespace "$ARGOCD_NS" \
+        --revision HEAD \
+        $(helm_set_args) \
+        --self-heal \
+        --auto-prune \
+        --grpc-web || {
+        log_error "Échec de création de l'application"
+        exit 1
+    }
+    log_success "Application ${ARGOCD_APP} créée"
+}
+
+# Mettre à jour les paramètres Helm et synchroniser
 argocd_deploy() {
     log_info "Déploiement de l'image ${IMAGE_REPO}:${IMAGE_TAG}..."
-    
-    # Vérifier que l'application existe
-    if ! argocd_check_app; then
-        log_error "L'application ${ARGOCD_APP} n'existe pas"
-        log_info "Créez-la manuellement dans ArgoCD ou utilisez le pipeline Jenkins avec ARGOCD_CREATE_APP=true"
-        exit 1
-    fi
-    
-    # Mettre à jour les valeurs Helm
-    log_info "Mise à jour des valeurs Helm..."
     log_info "  Repository: ${IMAGE_REPO}"
     log_info "  Tag: ${IMAGE_TAG}"
-    
-    argocd app set "$ARGOCD_APP" \
-        --helm-set image.repository="${IMAGE_REPO}" \
-        --helm-set image.tag="${IMAGE_TAG}" \
-        --grpc-web || {
+
+    argocd app set "$ARGOCD_APP" $(helm_set_args) --grpc-web || {
         log_warning "Échec mise à jour des valeurs Helm (peut-être déjà à jour)"
     }
-    
-    # Synchroniser l'application
+
     log_info "Synchronisation de l'application..."
     argocd app sync "$ARGOCD_APP" \
         --grpc-web \
@@ -285,11 +291,10 @@ argocd_deploy() {
         log_info "Vérifiez les logs: argocd app get ${ARGOCD_APP} --grpc-web"
         exit 1
     }
-    
+
     log_success "Application synchronisée avec succès"
     log_info "Image déployée: ${IMAGE_REPO}:${IMAGE_TAG}"
-    
-    # Afficher le statut
+
     echo ""
     log_info "Statut de l'application:"
     argocd app get "$ARGOCD_APP" --grpc-web 2>&1 | grep -E "Name:|Namespace:|Status:|Health:|Sync:" | head -10 || true
@@ -308,13 +313,18 @@ main() {
     log_info "  Image: ${IMAGE_REPO}:${IMAGE_TAG}"
     log_info "  ArgoCD Server: ${ARGOCD_SERVER}"
     echo ""
-    
-    # Se connecter à ArgoCD
+
     argocd_login
-    
-    # Déployer
+
+    if ! argocd_check_app; then
+        log_warning "L'application ${ARGOCD_APP} n'existe pas, création..."
+        argocd_create_app
+    else
+        log_success "L'application ${ARGOCD_APP} existe"
+    fi
+
     argocd_deploy
-    
+
     echo ""
     log_success "Déploiement terminé !"
     echo ""
