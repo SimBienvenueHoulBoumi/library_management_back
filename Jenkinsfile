@@ -76,11 +76,15 @@ pipeline {
 
         /**
          * Nettoyage du projet avant les tests
-         * - Supprime le répertoire target pour éviter les conflits entre tests parallèles
+         * - Supprime le répertoire target (évite "Cannot create resource output directory" si permissions incorrectes sur volume monté)
          */
         stage('🧹 Clean') {
             steps {
-                sh './mvnw clean || rm -rf target || true'
+                sh '''
+                    rm -rf target 2>/dev/null || true
+                    mkdir -p target
+                    ./mvnw clean -q || true
+                '''
             }
         }
 
