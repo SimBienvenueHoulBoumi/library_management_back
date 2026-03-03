@@ -39,11 +39,10 @@ securityContext: {}
   # runAsUser: 1000
 
 service:
-  type: ClusterIP
+  # NodePort requis pour que Traefik (Docker) route https://library-management.localhost vers Kind
+  type: NodePort
   port: 8075
   targetPort: 8075
-  # Pour accès via Traefik (library-management.localhost) sans port-forward : NodePort + nodePort 30075
-  # et Kind créé avec extraPortMappings (voir infra/kind-library-management.yaml)
   nodePort: 30075
 
 ingress:
@@ -95,12 +94,12 @@ config:
   # - name: SPRING_DATASOURCE_URL
   #   value: "jdbc:postgresql://postgres:5432/librarydb"
 
-# Health checks
+# Health checks (Spring Boot peut mettre 30–60 s à écouter sur 8075)
 livenessProbe:
   httpGet:
     path: /actuator/health
     port: 8075
-  initialDelaySeconds: 30
+  initialDelaySeconds: 60
   periodSeconds: 30
   timeoutSeconds: 5
   failureThreshold: 3
@@ -109,7 +108,7 @@ readinessProbe:
   httpGet:
     path: /actuator/health
     port: 8075
-  initialDelaySeconds: 15
+  initialDelaySeconds: 45
   periodSeconds: 10
   timeoutSeconds: 5
-  failureThreshold: 3
+  failureThreshold: 6

@@ -19,7 +19,7 @@ ArgoCD va alors suivre le chart Helm `kubernetes/charts/library-management` du d
 
 L’image Docker est fixée via `source.helm.parameters`. Si le pull échoue (**EOF**, timeout), voir la section *Contournement : charger l’image dans Kind* ci‑dessous.
 
-**Déploiement Kind (sans pull) :** le chart utilise **imagePullPolicy: Never** pour éviter les erreurs de pull (EOF) depuis le registry. L’image doit être **chargée dans Kind** avant la Sync (voir ci‑dessous). Tag = **`latest`**.
+**Déploiement Kind (sans pull) :** image **chargée dans Kind** avant la Sync. Probes avec délais pour éviter « Readiness probe failed » au démarrage de Spring Boot.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -44,6 +44,10 @@ spec:
           value: "latest"
         - name: image.pullPolicy
           value: "Never"
+        - name: readinessProbe.initialDelaySeconds
+          value: "45"
+        - name: livenessProbe.initialDelaySeconds
+          value: "60"
   project: default
   syncPolicy:
     automated:
@@ -63,6 +67,26 @@ kind load docker-image host.docker.internal:8083/repository/docker-hosted/simdev
 
 - Si l’image `:latest` n’existe pas encore en local : lancer un build Jenkins (qui pousse et tague `latest`), ou `docker build -t host.docker.internal:8083/repository/docker-hosted/simdev/library-management:latest .` puis la commande ci‑dessus.
 - Dans l’app ArgoCD : **image.tag** = `latest`, **image.pullPolicy** = `Never`. Puis **Sync**.
+
+---
+
+## Accès à l’API (Swagger, routes, autre app)
+
+Une fois le pod **Running** et le Service en **NodePort** (chart par défaut), l’API est exposée via Traefik. Vérifier que l’entrée existe dans `/etc/hosts` : `127.0.0.1 library-management.localhost` (ou `./main.sh ensure-hosts` depuis l’infra).
+
+| Usage | URL |
+|-------|-----|
+| **Swagger UI** | **https://library-management.localhost/swagger-ui.html** |
+| **Swagger API JSON** | https://library-management.localhost/v3/api-docs |
+| **Health** | https://library-management.localhost/actuator/health |
+| **Base API** (pour appels HTTP) | **https://library-management.localhost** |
+
+**Exemples de routes (préfixe `/api`)** : `/api/books`, `/api/members`, `/api/loans`, `/api/users`.  
+Authentification : HTTP Basic (voir README du projet pour les identifiants par défaut).
+
+**Depuis une autre application** :
+- **Navigateur ou front (même machine)** : `fetch('https://library-management.localhost/api/books')` (gérer CORS si besoin).
+- **Pod dans le même cluster Kubernetes** : utiliser l’URL interne du service : `http://library-management.default.svc.cluster.local:8075` (pas de HTTPS, pas de Traefik).
 
 ---
 
