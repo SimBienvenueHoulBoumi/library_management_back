@@ -1,6 +1,6 @@
 # Chart Helm pour library-management
 
-Ce chart Helm permet de déployer l'application `library-management` dans un cluster Kubernetes via ArgoCD.
+Ce chart Helm permet de déployer l'application `library-management` dans un cluster Kubernetes.
 
 ## Structure
 
@@ -65,14 +65,6 @@ helm upgrade library-management ./kubernetes/charts/library-management \
   --namespace default
 ```
 
-### Via ArgoCD (recommandé)
-
-Le chart est automatiquement déployé par ArgoCD via le pipeline Jenkins.
-
-1. Le pipeline Jenkins construit et pousse l'image Docker
-2. ArgoCD synchronise le chart depuis le repository Git
-3. L'application est déployée dans le cluster Kubernetes
-
 ### Accès à l'application (Swagger UI) sans port-forward
 
 Avec l'infra (Traefik + Kind configuré avec `kind-config.yaml`) :
@@ -101,61 +93,4 @@ Modifiez `values.yaml` pour personnaliser :
 - Pour un cluster local (kind/k3d), utilisez `host.docker.internal:8083` dans l'image
 - Pour un cluster distant, configurez un registry accessible (Nexus, Docker Hub, etc.)
 
-### Manifeste ArgoCD à coller dans l’UI
-
-Utilise **host.docker.internal** (aligné avec le Jenkinsfile et `kind load`). Avant la Sync, charger l’image dans Kind :
-
-```bash
-./main.sh load-app-image   # depuis infra/
-# ou : ./infra/main.sh load-app-image   # depuis la racine des projets
-```
-(Depuis la racine du projet **infra** ; charge l’image dans Kind une fois après le 1er build Jenkins.)
-
-Puis créer l’application dans ArgoCD (NEW APP → EDIT AS YAML) et coller le YAML ci‑dessous.
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: library-management
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: 'https://github.com/SimBienvenueHoulBoumi/library_management_back.git'
-    path: kubernetes/charts/library-management
-    targetRevision: HEAD
-    helm:
-      releaseName: library-management
-      valueFiles: []
-      values: |
-        image:
-          repository: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
-          tag: latest
-          pullPolicy: Never
-        service:
-          type: NodePort
-          nodePort: 30075
-        readinessProbe:
-          initialDelaySeconds: 45
-          failureThreshold: 6
-        livenessProbe:
-          initialDelaySeconds: 60
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-    retry:
-      limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-```
+- Pour un cluster Kind local, charger l'image après le build : `./main.sh load-app-image` (depuis le projet infra).

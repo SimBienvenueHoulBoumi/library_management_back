@@ -89,3 +89,62 @@ Tous les endpoints nécessitent le rôle `ADMIN`.
 
 Ces endpoints sont publics pour permettre l’intégration avec le frontend et apparaissent maintenant dans Swagger.
 
+## ArgoCD
+
+Pour déployer l'application dans un cluster Kubernetes via ArgoCD à partir du chart Helm de ce dépôt :
+
+1. **Prérequis** : ArgoCD installé et accessible (ex. https://argocd.localhost), cluster Kind avec l'image chargée si besoin : `./main.sh load-app-image` (depuis le projet `infra`).
+2. **Créer l'application** : dans l'interface ArgoCD, **NEW APP** → **EDIT AS YAML**.
+3. **Coller le manifeste** ci-dessous (il pointe vers ce repo, le path du chart et les paramètres Helm : image, NodePort 30075, probes).
+4. **Créer** puis laisser ArgoCD synchroniser ; l'app sera disponible sur https://library-management.localhost (avec Traefik).
+
+### Manifeste Application ArgoCD (YAML à coller dans l'UI)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: library-management
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/SimBienvenueHoulBoumi/library_management_back.git
+    path: kubernetes/charts/library-management
+    targetRevision: HEAD
+    helm:
+      parameters:
+        - name: image.repository
+          value: host.docker.internal:8083/repository/docker-hosted/simdev/library-management
+        - name: image.tag
+          value: latest
+        - name: image.pullPolicy
+          value: Never
+        - name: service.type
+          value: NodePort
+        - name: service.nodePort
+          value: "30075"
+        - name: readinessProbe.initialDelaySeconds
+          value: "45"
+        - name: livenessProbe.initialDelaySeconds
+          value: "60"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+
+  links:
+    - title: Swagger UI
+      url: https://library-management.localhost/swagger-ui.html
+    - title: API Health
+      url: https://library-management.localhost/actuator/health
+    - title: API (base)
+      url: https://library-management.localhost
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+

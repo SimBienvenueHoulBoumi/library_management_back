@@ -37,7 +37,7 @@ pipeline {
         NEXUS_REGISTRY      = "${NEXUS_REGISTRY_HOST}/repository/docker-hosted"
         REGISTRY_CRED       = 'NEXUS_CREDENTIALS'
         IMAGE_REPO          = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
-        // Même référence que IMAGE_REPO : le chart Helm / ArgoCD doit utiliser ce chemin pour que le pull (ou kind load) corresponde.
+        // Même référence que IMAGE_REPO : le chart Helm doit utiliser ce chemin pour que le pull (ou kind load) corresponde.
         K8S_IMAGE_REPO      = "${IMAGE_REPO}"
         // Nom du cluster Kind pour l'étape "Load image into Kind" (évite le pull depuis Nexus par les nœuds).
         KIND_CLUSTER_NAME   = 'dev'
@@ -311,37 +311,6 @@ pipeline {
                             echo "   kind load docker-image '${IMAGE_REPO}:${deployTag}' --name ${KIND_CLUSTER_NAME}"
                         fi
                     """
-                }
-            }
-        }
-
-        /**
-         * Déploiement via ArgoCD (script deploy-argocd.sh).
-         * Met à jour l'app library-management (ou la crée si absente) avec les mêmes paramètres que le manifeste README-argocd (NodePort 30075, etc.) puis Sync.
-         * Prérequis : argocd CLI sur l'agent ; credential "ARGOCD_ADMIN_PASSWORD" (Secret text = mot de passe admin, ex. ./main.sh argocd-password).
-         */
-        stage('🚀 Deploy to ArgoCD') {
-            when { expression { shouldBuildAndPush() } }
-            steps {
-                script {
-                    def hasArgocd = sh(script: 'command -v argocd', returnStatus: true) == 0
-                    if (!hasArgocd) {
-                        echo "⚠️ ArgoCD CLI non installé sur l'agent → étape Deploy to ArgoCD ignorée."
-                        return
-                    }
-                    try {
-                        withCredentials([string(credentialsId: 'ARGOCD_ADMIN_PASSWORD', variable: 'ARGOCD_PASS')]) {
-                            sh """
-                                export ARGOCD_PASS
-                                export IMAGE_REPO="${IMAGE_REPO}"
-                                export IMAGE_TAG=latest
-                                export ARGOCD_SERVER=host.docker.internal:8084
-                                ./scripts/deploy-argocd.sh
-                            """
-                        }
-                    } catch (Exception e) {
-                        echo "⚠️ Deploy to ArgoCD échoué (vérifier credential ARGOCD_ADMIN_PASSWORD et accès à ArgoCD). Build continu."
-                    }
                 }
             }
         }
