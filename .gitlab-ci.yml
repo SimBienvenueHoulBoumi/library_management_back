@@ -1,0 +1,190 @@
+stages:
+  - prepare
+  - test
+  - quality
+  - docker
+  - security
+  - deploy
+  - cleanup
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+default:
+  image: maven:3.9.9-eclipse-temurin-17
+  timeout: 45m
+  before_script:
+    - chmod +x mvnw || true
+  cache:
+    key: maven-${CI_PROJECT_ID}
+    paths:
+      - .m2/repository
+
+variables:
+  MAVEN_CLI_OPTS: "-B -q"
+  PROJECT_NAME: "library-management"
+  SONAR_URL: "http://sonarqube:9000"
+  SONAR_PROJECT_KEY: "library-management"
+  FAIL_ON_SONAR: "true"
+  FAIL_ON_TRIVY: "false"
+  NEXUS_REGISTRY_HOST: "host.docker.internal:8083"
+  NEXUS_REGISTRY: "host.docker.internal:8083/repository/docker-hosted"
+  KIND_CLUSTER_NAME: "dev"
+
+# ───────────────────────── PREPARE ─────────────────────────
+
+prepare:
+  stage: prepare
+  script:
+    - ./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout > version.txt
+    - ./mvnw clean
+  artifacts:
+    paths:
+      - version.txt
+    expire_in: 1 day
+
+# ───────────────────────── TESTS ─────────────────────────
+
+unit_tests:
+  stage: test
+  needs: ["prepare"]
+  script:
+    - ./mvnw test -DskipITs=true
+  artifacts:
+    when: always
+    reports:
+      junit: target/surefire-reports/*.xml
+
+integration_tests:
+  stage: test
+  needs: ["prepare"]
+  script:
+    - ./mvnw verify -DskipUnitTests=true
+  artifacts:
+    when: always
+    reports:
+      junit: target/failsafe-reports/*.xml
+    paths:
+      - target/*.jar
+
+# ───────────────────────── SONAR ─────────────────────────
+
+sonarqube:
+  stage: quality
+  needs: ["unit_tests", "integration_tests"]
+  script:
+    - export PROJECT_VERSION="$(cat version.txt)"
+    - |
+      set +e
+      ./mvnw sonar:sonar \
+        -Dsonar.host.url="${SONAR_URL}" \
+        -Dsonar.token="${SONAR_TOKEN}" \
+        -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+        -Dsonar.projectVersion="${PROJECT_VERSION}" \
+        -Dsonar.qualitygate.wait=true \
+        -DskipTests
+      EXIT_CODE=$?
+      set -e
+      if [ "$EXIT_CODE" -ne 0 ] && [ "$FAIL_ON_SONAR" = "true" ]; then
+        exit 1
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ───────────────────────── DOCKER BUILD + PUSH ─────────────────────────
+
+docker_build_push:
+  stage: docker
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  needs: ["integration_tests"]
+  before_script:
+    - apk add --no-cache bash
+    - export IMAGE_REPO="${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+    - echo "$REGISTRY_PASSWORD" | docker login "http://${NEXUS_REGISTRY_HOST}" -u admin --password-stdin
+  script:
+    - export VERSION="$(cat version.txt)"
+    - export SHORT_SHA="${CI_COMMIT_SHORT_SHA}"
+    - |
+      docker build \
+        -t ${IMAGE_REPO}:${CI_PIPELINE_IID} \
+        -t ${IMAGE_REPO}:${SHORT_SHA} \
+        -t ${IMAGE_REPO}:latest \
+        -t ${IMAGE_REPO}:${VERSION} .
+    - docker push --all-tags ${IMAGE_REPO}
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ───────────────────────── TRIVY ─────────────────────────
+
+trivy_scan:
+  stage: security
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  needs: ["docker_build_push"]
+  before_script:
+    - apk add --no-cache curl
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    - export IMAGE_REPO="${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+  script:
+    - docker pull ${IMAGE_REPO}:${CI_PIPELINE_IID}
+    - mkdir -p reports/trivy
+    - |
+      trivy image \
+        --severity CRITICAL,HIGH \
+        --format json \
+        --output reports/trivy/report.json \
+        ${IMAGE_REPO}:${CI_PIPELINE_IID} || true
+  artifacts:
+    paths:
+      - reports/trivy/
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ───────────────────────── KIND LOAD ─────────────────────────
+
+kind_load:
+  stage: deploy
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  needs: ["docker_build_push"]
+  before_script:
+    - apk add --no-cache curl
+    - curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+    - chmod +x ./kind
+    - export IMAGE_REPO="${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
+  script:
+    - |
+      if ./kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
+        ./kind load docker-image ${IMAGE_REPO}:latest --name ${KIND_CLUSTER_NAME}
+      else
+        echo "Cluster kind '${KIND_CLUSTER_NAME}' non trouvé."
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ───────────────────────── CLEANUP ─────────────────────────
+
+cleanup:
+  stage: cleanup
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - docker system prune -af || true
+  when: always
