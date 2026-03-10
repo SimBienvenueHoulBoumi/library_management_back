@@ -148,3 +148,18 @@ spec:
       selfHeal: true
 ```
 
+## GitLab CI – Registry Nexus
+
+L’erreur `lookup host.docker.internal on 169.254.169.254:53: no such host` apparaît car `host.docker.internal` n’existe pas sur les runners Linux (GitLab.com).
+
+**Solutions :**
+
+1. **Runners self-hostés sur votre Mac** : `host.docker.internal` fonctionne. Enregistrez un runner GitLab sur votre machine.
+2. **Runners partagés GitLab.com** : définir dans **Settings → CI/CD → Variables** :
+   - `NEXUS_REGISTRY_HOST` = URL de Nexus accessible depuis internet (ex. `nexus.example.com:443`)
+   - `REGISTRY_PASSWORD` = mot de passe admin Nexus (variable masquée)
+   - **`SONAR_URL`** = URL SonarQube accessible depuis le runner (ex. `https://sonarqube.example.com` si tout passe par Traefik)
+   - **`SONAR_TOKEN`** = token SonarQube (variable masquée)
+
+Nexus et SonarQube doivent être joignables depuis le runner. Si Nexus tourne uniquement en local, utilisez des runners self-hostés.
+

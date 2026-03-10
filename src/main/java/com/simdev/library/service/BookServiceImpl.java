@@ -50,7 +50,7 @@ public class BookServiceImpl implements BookService {
         if (book.getAvailableCopies() > 0) {
             book.setAvailable(true);
         }
-
+        
         if (book.getAuthors() != null && !book.getAuthors().isEmpty()) {
             Set<Author> resolvedAuthors = book.getAuthors().stream()
                 .map(this::resolveAuthor)
