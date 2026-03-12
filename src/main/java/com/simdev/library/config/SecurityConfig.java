@@ -47,6 +47,8 @@ public class SecurityConfig {
                                                    RestAuthenticationEntryPoint authenticationEntryPoint,
                                                    DaoAuthenticationProvider authenticationProvider) throws Exception {
         http
+                // CSRF disabled: stateless API with HTTP Basic (Authorization header). CSRF targets cookie-based sessions;
+                // with no session cookie and auth via header, cross-site requests cannot be authenticated by the browser.
                 .csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::sameOrigin))
