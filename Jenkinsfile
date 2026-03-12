@@ -32,8 +32,9 @@ pipeline {
         // OBLIGATOIRE: Dans Jenkins → Manage Jenkins → Credentials, créer une credential
         // de type "Username with password" (pas "Secret text") avec ID = NEXUS_CREDENTIALS,
         // username = admin Nexus, password = mot de passe admin (./main.sh nexus-password).
-        // host.docker.internal:8083 car le daemon Docker est sur l'hôte (socket monté) ; le hostname "nexus" n'est pas résolu par le daemon.
-        NEXUS_REGISTRY_HOST = 'host.docker.internal:8083'
+        // 127.0.0.1:8083 car le daemon Docker est sur l'hôte (host.docker.internal ne se résout pas sur le Mac).
+        // Pour HTTP : insecure-registries sur le démon pour 127.0.0.1:8083.
+        NEXUS_REGISTRY_HOST = '127.0.0.1:8083'
         NEXUS_REGISTRY      = "${NEXUS_REGISTRY_HOST}/repository/docker-hosted"
         REGISTRY_CRED       = 'NEXUS_CREDENTIALS'
         IMAGE_REPO          = "${NEXUS_REGISTRY}/simdev/${PROJECT_NAME}"
@@ -160,19 +161,11 @@ pipeline {
 
         /**
          * Analyse de qualité du code avec SonarQube
-         * - Exécuté sur main, release/*, hotfix/* et les pull requests
+         * - Exécuté à chaque build (toutes branches). Pour restreindre : ajouter when { anyOf { branch 'main'; ... } }
          * - Attend le quality gate (sonar.qualitygate.wait=true)
          * - FAIL_ON_SONAR contrôle si le build échoue en cas d'échec du quality gate
          */
         stage('📊 Quality – SonarQube') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch pattern: 'release/.*', comparator: 'REGEXP'
-                    branch pattern: 'hotfix/.*', comparator: 'REGEXP'
-                    changeRequest()
-                }
-            }
             steps {
                 withCredentials([string(credentialsId: SONAR_CRED, variable: 'TOKEN')]) {
                     script {
@@ -280,7 +273,7 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh """
-                        echo "\${PASS}" | docker login http://${NEXUS_REGISTRY_HOST} -u "\${USER}" --password-stdin || exit 1
+                        echo "\${PASS}" | docker login ${NEXUS_REGISTRY_HOST} -u "\${USER}" --password-stdin || exit 1
 
                         ${env.FULL_IMAGES.split(',').collect { "docker push ${it}" }.join('\n')}
 
