@@ -17,6 +17,14 @@ pipeline {
         skipDefaultCheckout(true)
     }
 
+    parameters {
+        string(name: 'DEPLOY_CHART_PATH_PARAM', defaultValue: '', description: 'Chemin du chart Helm (ex: kubernetes/charts/library-management). Vide = valeur par défaut du pipeline.')
+        string(name: 'DEPLOY_NAMESPACE_PARAM', defaultValue: '', description: 'Namespace Kubernetes pour le déploiement. Vide = default.')
+        string(name: 'DEPLOY_SERVICE_NODE_PORT_PARAM', defaultValue: '', description: 'NodePort du service (ex: 30075). Vide = valeur par défaut.')
+        string(name: 'DEPLOY_READINESS_DELAY_PARAM', defaultValue: '', description: 'readinessProbe.initialDelaySeconds. Vide = 45.')
+        string(name: 'DEPLOY_LIVENESS_DELAY_PARAM', defaultValue: '', description: 'livenessProbe.initialDelaySeconds. Vide = 60.')
+    }
+
     environment {
         // ─── Application ────────────────────────────────────────────────
         APP_NAME           = 'library-management'
@@ -42,6 +50,15 @@ pipeline {
         K8S_IMAGE_REPO      = "${IMAGE_REPO}"
         // Nom du cluster Kind pour l'étape "Load image into Kind" (évite le pull depuis Nexus par les nœuds).
         KIND_CLUSTER_NAME   = 'dev'
+
+        // ─── Déploiement Helm (stage Deploy to Kind) – réutilisable en changeant ces variables ─
+        DEPLOY_CHART_PATH              = 'kubernetes/charts/library-management'
+        DEPLOY_NAMESPACE               = 'default'
+        DEPLOY_SERVICE_TYPE            = 'NodePort'
+        DEPLOY_SERVICE_NODE_PORT       = '30075'
+        DEPLOY_IMAGE_PULL_POLICY       = 'Never'
+        DEPLOY_READINESS_INITIAL_DELAY = '45'
+        DEPLOY_LIVENESS_INITIAL_DELAY  = '60'
 
         // ─── Quality & Security ─────────────────────────────────────────
         SONAR_URL          = 'http://sonarqube:9000'
@@ -283,6 +300,34 @@ pipeline {
                             echo "⚠️ kind non trouvé. Pour éviter ImagePullBackOff, exécuter sur l'hôte :"
                             echo "   kind load docker-image '${IMAGE_REPO}:${deployTag}' --name ${KIND_CLUSTER_NAME}"
                         fi
+                    """
+                }
+            }
+        }
+
+        /**
+         * Déploiement Helm dans le cluster Kind. Valeurs par défaut dans environment ; surcharge via "Build with Parameters".
+         * Prérequis : helm et kubectl sur l'agent, contexte vers Kind (KIND_CLUSTER_NAME).
+         */
+        stage('🚀 Deploy to Kind') {
+            when { expression { shouldBuildAndPush() } }
+            steps {
+                script {
+                    def chartPath   = ((params.DEPLOY_CHART_PATH_PARAM ?: '').trim()) ? (params.DEPLOY_CHART_PATH_PARAM.trim()) : env.DEPLOY_CHART_PATH
+                    def namespace   = ((params.DEPLOY_NAMESPACE_PARAM ?: '').trim()) ? (params.DEPLOY_NAMESPACE_PARAM.trim()) : env.DEPLOY_NAMESPACE
+                    def nodePort    = ((params.DEPLOY_SERVICE_NODE_PORT_PARAM ?: '').trim()) ? (params.DEPLOY_SERVICE_NODE_PORT_PARAM.trim()) : env.DEPLOY_SERVICE_NODE_PORT
+                    def readyDelay  = ((params.DEPLOY_READINESS_DELAY_PARAM ?: '').trim()) ? (params.DEPLOY_READINESS_DELAY_PARAM.trim()) : env.DEPLOY_READINESS_INITIAL_DELAY
+                    def liveDelay   = ((params.DEPLOY_LIVENESS_DELAY_PARAM ?: '').trim()) ? (params.DEPLOY_LIVENESS_DELAY_PARAM.trim()) : env.DEPLOY_LIVENESS_INITIAL_DELAY
+                    def deployTag   = env.PROJECT_VERSION?.trim() ?: env.BUILD_NUMBER
+                    sh """
+                        helm upgrade --install ${APP_NAME} ${chartPath} --namespace ${namespace} \\
+                            --set image.repository=${IMAGE_REPO} \\
+                            --set image.tag=${deployTag} \\
+                            --set image.pullPolicy=${DEPLOY_IMAGE_PULL_POLICY} \\
+                            --set service.type=${DEPLOY_SERVICE_TYPE} \\
+                            --set service.nodePort=${nodePort} \\
+                            --set readinessProbe.initialDelaySeconds=${readyDelay} \\
+                            --set livenessProbe.initialDelaySeconds=${liveDelay}
                     """
                 }
             }
