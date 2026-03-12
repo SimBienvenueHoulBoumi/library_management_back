@@ -108,20 +108,10 @@ pipeline {
                                     script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true',
                                     returnStdout: true
                                 ).trim()
-                                
                                 if (reportsExist) {
                                     junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-                                } else {
-                                    sh '''
-                                        mkdir -p target/surefire-reports
-                                        cat > target/surefire-reports/TEST-empty.xml << 'EOF'
-                                        <?xml version="1.0" encoding="UTF-8"?>
-                                        <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
-                                        </testsuite>
-                                        EOF
-                                    '''
-                                    junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 }
+                                // Pas de rapport vide : publier des suites avec tests="0" fait échouer le build ("None of the test reports contained any result")
                             }
                         }
                     }
@@ -138,20 +128,10 @@ pipeline {
                                     script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true',
                                     returnStdout: true
                                 ).trim()
-                                
                                 if (reportsExist) {
                                     junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
-                                } else {
-                                    sh '''
-                                        mkdir -p target/failsafe-reports
-                                        cat > target/failsafe-reports/TEST-empty.xml << 'EOF'
-                                        <?xml version="1.0" encoding="UTF-8"?>
-                                        <testsuite name="EmptyTestSuite" tests="0" failures="0" errors="0" skipped="0" time="0.0">
-                                        </testsuite>
-                                        EOF
-                                    '''
-                                    junit testResults: 'target/failsafe-reports/*.xml', allowEmptyResults: true, keepLongStdio: true
                                 }
+                                // Pas de rapport vide : éviter "None of the test reports contained any result"
                             }
                         }
                     }
@@ -329,10 +309,10 @@ pipeline {
             script {
                 def surefireExists = sh(script: 'test -d target/surefire-reports && ls target/surefire-reports/*.xml 2>/dev/null | head -1 || true', returnStdout: true).trim()
                 def failsafeExists = sh(script: 'test -d target/failsafe-reports && ls target/failsafe-reports/*.xml 2>/dev/null | head -1 || true', returnStdout: true).trim()
-                
                 if (surefireExists || failsafeExists) {
                     junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml, target/failsafe-reports/*.xml'
                 }
+                // Ne pas publier si aucun rapport : évite "None of the test reports contained any result"
             }
         }
         success  { echo "✅ Pipeline completed successfully" }
